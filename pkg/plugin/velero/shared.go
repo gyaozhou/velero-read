@@ -26,6 +26,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+// zhou: Both backup and restore AppliesTo() result, the plugins interested resouces.
+
 // ResourceSelector is a collection of included/excluded namespaces,
 // included/excluded resources, and a label-selector that can be used
 // to match a set of items from a cluster.
@@ -38,6 +40,9 @@ type ResourceSelector struct {
 	// All namespaces in IncludedNamespaces, *except* those in
 	// this slice, will be matched.
 	ExcludedNamespaces []string
+
+	// zhou: resource name is flexible
+
 	// IncludedResources is a slice of resources to match. Resources may be specified
 	// as full names (e.g. "services"), abbreviations (e.g. "svc"), or with the
 	// groups they are in (e.g. "ingresses.extensions"). All resources in this slice,
@@ -49,6 +54,7 @@ type ResourceSelector struct {
 	// groups they are in (e.g. "ingresses.extensions"). All resources in IncludedResources,
 	// *except* those in this slice, will be matched.
 	ExcludedResources []string
+
 	// LabelSelector is a string representation of a selector to apply
 	// when matching resources. See "k8s.io/apimachinery/pkg/labels".Parse()
 	// for details on syntax.

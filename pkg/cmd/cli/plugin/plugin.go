@@ -22,6 +22,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/client"
 )
 
+// zhou: velero client cli, e.g. `velero plugin add velero/velero-plugin-example`
 func NewCommand(f client.Factory) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "plugin",

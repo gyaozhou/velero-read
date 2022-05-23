@@ -46,6 +46,8 @@ var backup = builder.ForBackup("velero", "backup-1").
 
 */
 
+// zhou: way to setup API Backup.
+
 // BackupBuilder builds Backup objects.
 type BackupBuilder struct {
 	object *velerov1api.Backup
@@ -81,6 +83,8 @@ func (b *BackupBuilder) ObjectMeta(opts ...ObjectMetaOpt) *BackupBuilder {
 	return b
 }
 
+// zhou: build Backup CR from Schedule CR
+
 // FromSchedule sets the Backup's spec and labels from the Schedule template
 func (b *BackupBuilder) FromSchedule(schedule *velerov1api.Schedule) *BackupBuilder {
 	var labels map[string]string
@@ -95,6 +99,7 @@ func (b *BackupBuilder) FromSchedule(schedule *velerov1api.Schedule) *BackupBuil
 			"labels": schedule.Spec.Template.Metadata.Labels,
 		}).Info("Schedule.template.metadata.labels set - using those labels instead of schedule.labels for backup object")
 	} else {
+		// zhou: map is a reference type.
 		labels = schedule.Labels
 		logrus.WithFields(logrus.Fields{
 			"backup": fmt.Sprintf("%s/%s", b.object.GetNamespace(), b.object.GetName()),
@@ -104,11 +109,14 @@ func (b *BackupBuilder) FromSchedule(schedule *velerov1api.Schedule) *BackupBuil
 	if labels == nil {
 		labels = make(map[string]string)
 	}
+	// zhou: backup always includes its schedule in label.
 	labels[velerov1api.ScheduleNameLabel] = schedule.Name
 
 	b.object.Spec = schedule.Spec.Template
+	// zhou: merge labels
 	b.ObjectMeta(WithLabelsMap(labels))
 
+	// zhou: merge labels
 	if schedule.Annotations != nil {
 		b.ObjectMeta(WithAnnotationsMap(schedule.Annotations))
 	}

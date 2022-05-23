@@ -21,6 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
+// zhou: used by object store plugin.
+
 // ValidateObjectStoreConfigKeys ensures that an object store's config
 // is valid by making sure each `config` key is in the `validKeys` list.
 // The special keys "bucket" and "prefix" are always considered valid.
@@ -36,6 +38,7 @@ func ValidateVolumeSnapshotterConfigKeys(config map[string]string, validKeys ...
 	return validateConfigKeys(config, validKeys...)
 }
 
+// zhou: plugin validate that "config" only includes the key which it supports.
 func validateConfigKeys(config map[string]string, validKeys ...string) error {
 	validKeysSet := sets.NewString(validKeys...)
 

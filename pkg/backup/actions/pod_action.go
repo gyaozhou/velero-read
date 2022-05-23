@@ -27,6 +27,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/actionhelpers"
 )
 
+// zhou: internal plugin, handle {BackupItemAction, "velero.io/pod"}
+
 // PodAction implements ItemAction.
 type PodAction struct {
 	log logrus.FieldLogger
@@ -43,6 +45,8 @@ func (a *PodAction) AppliesTo() (velero.ResourceSelector, error) {
 		IncludedResources: []string{"pods"},
 	}, nil
 }
+
+// zhou: backup pod related pvc at the same time.
 
 // Execute scans the pod's spec.volumes for persistentVolumeClaim volumes and returns a
 // ResourceIdentifier list containing references to all of the persistentVolumeClaim volumes used by

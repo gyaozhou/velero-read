@@ -46,6 +46,9 @@ func AdaptedBackupItemActions() []AdaptedBackupItemAction {
 	}
 }
 
+// zhou: implement "BackupItemAction interface",
+//       used to talk with this plugin process's BackupItemAction interface.
+
 // RestartableBackupItemAction is a backup item action for a given implementation (such as "pod"). It is associated with
 // a restartableProcess, which may be shared and used to run multiple plugins. At the beginning of each method
 // call, the restartableBackupItemAction asks its restartableProcess to restart itself if needed (e.g. if the
@@ -55,6 +58,9 @@ type RestartableBackupItemAction struct {
 	SharedPluginProcess process.RestartableProcess
 }
 
+// zhou: create a new instance. There is no manager to manage these instances.
+//       So, there are might be several instances for same one.
+
 // NewRestartableBackupItemAction returns a new RestartableBackupItemAction.
 func NewRestartableBackupItemAction(name string, sharedPluginProcess process.RestartableProcess) *RestartableBackupItemAction {
 	r := &RestartableBackupItemAction{
@@ -63,6 +69,9 @@ func NewRestartableBackupItemAction(name string, sharedPluginProcess process.Res
 	}
 	return r
 }
+
+// zhou: get registered plugin's interface "BackupItemAction" by {PluginKind, Registered Plugin Name},
+//       here PluginKind is "BackupItemAction".
 
 // getBackupItemAction returns the backup item action for this restartableBackupItemAction. It does *not* restart the
 // plugin process.
@@ -89,6 +98,8 @@ func (r *RestartableBackupItemAction) getDelegate() (biav1.BackupItemAction, err
 	return r.getBackupItemAction()
 }
 
+// zhou: rpc call to vendor's implementtation.
+
 // AppliesTo restarts the plugin's process if needed, then delegates the call.
 func (r *RestartableBackupItemAction) AppliesTo() (velero.ResourceSelector, error) {
 	delegate, err := r.getDelegate()
@@ -98,6 +109,8 @@ func (r *RestartableBackupItemAction) AppliesTo() (velero.ResourceSelector, erro
 
 	return delegate.AppliesTo()
 }
+
+// zhou: rpc call to vendor's implementtation.
 
 // Execute restarts the plugin's process if needed, then delegates the call.
 func (r *RestartableBackupItemAction) Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {

@@ -38,7 +38,9 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
+// zhou: "velero backup create ..."
 func NewCreateCommand(f client.Factory, use string) *cobra.Command {
+	// zhou: object orient
 	o := NewCreateOptions()
 
 	c := &cobra.Command{
@@ -69,15 +71,20 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
   velero backup create backup4 --wait`,
 	}
 
+	// zhou: major flags backup command
 	o.BindFlags(c.Flags())
+	// zhou: whether need to wait for execution.
 	o.BindWait(c.Flags())
+	// zhou: schedule name if this backup is triggered by schedule.
 	o.BindFromSchedule(c.Flags())
+	// zhou: command output format control
 	output.BindFlags(c.Flags())
 	output.ClearOutputFlagDefault(c)
 
 	return c
 }
 
+// zhou: "velero backup create xxx" supports flags.
 type CreateOptions struct {
 	Name                            string
 	TTL                             time.Duration
@@ -158,6 +165,7 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 // BindWait binds the wait flag separately so it is not called by other create
 // commands that reuse CreateOptions's BindFlags method.
 func (o *CreateOptions) BindWait(flags *pflag.FlagSet) {
+	// zhou: wait for completion
 	flags.BoolVarP(&o.Wait, "wait", "w", o.Wait, "Wait for the operation to complete.")
 }
 
@@ -192,8 +200,13 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 			"They cannot be used together")
 	}
 
+	// zhou: if BSL specified, validate it.
+
 	if o.StorageLocation != "" {
 		location := &velerov1api.BackupStorageLocation{}
+
+		// zhou: controller-runtime style, but it doesn't have cache since not get from manager.
+
 		if err := o.client.Get(context.Background(), kbclient.ObjectKey{
 			Namespace: f.Namespace(),
 			Name:      o.StorageLocation,
@@ -202,7 +215,10 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 		}
 	}
 
+	// zhou: if VSL specified, validate it.
 	for _, loc := range o.SnapshotLocations {
+
+		// zhou: clientset style. It supposed that VSL could aslo use controller-runtime style client like above.
 		snapshotLocation := new(velerov1api.VolumeSnapshotLocation)
 		if err := o.client.Get(context.Background(), kbclient.ObjectKey{Namespace: f.Namespace(), Name: loc}, snapshotLocation); err != nil {
 			return err
@@ -225,6 +241,7 @@ func (o *CreateOptions) Complete(args []string, f client.Factory) error {
 	return nil
 }
 
+// zhou: create Backup CR
 func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 	backup, err := o.BuildBackup(f.Namespace())
 	if err != nil {
@@ -343,15 +360,19 @@ func ParseOrderedResources(orderMapStr string) (map[string]string, error) {
 	return orderedResources, nil
 }
 
+// zhou: build Backup CR from Schedule's Spec or cli flags
 func (o *CreateOptions) BuildBackup(namespace string) (*velerov1api.Backup, error) {
 	var backupBuilder *builder.BackupBuilder
 
+	// zhou: in case of Schedule trigglerd backup
 	if o.FromSchedule != "" {
 		schedule := new(velerov1api.Schedule)
 		err := o.client.Get(context.TODO(), kbclient.ObjectKey{Namespace: namespace, Name: o.FromSchedule}, schedule)
 		if err != nil {
 			return nil, err
 		}
+		// zhou: if backup name is not specified, use the timestamp.
+		//       By default, schedule will not specify the backup name.
 		if o.Name == "" {
 			o.Name = schedule.TimestampedName(time.Now().UTC())
 		}
@@ -380,6 +401,7 @@ func (o *CreateOptions) BuildBackup(namespace string) (*velerov1api.Backup, erro
 			if err != nil {
 				return nil, err
 			}
+			// zhou: set it to Backup.Spec.OrderedResources
 			backupBuilder.OrderedResources(orders)
 		}
 
@@ -403,6 +425,7 @@ func (o *CreateOptions) BuildBackup(namespace string) (*velerov1api.Backup, erro
 		}
 	}
 
+	// zhou: cli could specify lable also
 	backup := backupBuilder.ObjectMeta(builder.WithLabelsMap(o.Labels.Data())).Result()
 	return backup, nil
 }

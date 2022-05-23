@@ -38,6 +38,8 @@ import (
 
 //go:generate mockery --name Factory
 
+// zhou: setup all kinds of k8s client, and set client's QPS/Burst/...
+
 // Factory knows how to create a VeleroClient and Kubernetes client.
 type Factory interface {
 	// BindFlags binds common flags (--kubeconfig, --namespace) to the passed-in FlagSet.
@@ -56,6 +58,9 @@ type Factory interface {
 	// It adds Kubernetes and Velero types to its scheme. It uses the following priority to specify the cluster
 	// configuration: --kubeconfig flag, KUBECONFIG environment variable, in-cluster configuration.
 	KubebuilderWatchClient() (kbclient.WithWatch, error)
+
+	// zhou: these functions should be set before get client.
+
 	// SetBasename changes the basename for an already-constructed client.
 	// This is useful for generating clients that require a different user-agent string below the root `velero`
 	// command, such as the server subcommand.
@@ -64,6 +69,7 @@ type Factory interface {
 	SetClientQPS(float32)
 	// SetClientBurst sets the Burst for a client.
 	SetClientBurst(int)
+
 	// ClientConfig returns a rest.Config struct used for client-go clients.
 	ClientConfig() (*rest.Config, error)
 	// Namespace returns the namespace which the Factory will create clients for.
@@ -86,7 +92,7 @@ func NewFactory(baseName string, config VeleroConfig) Factory {
 		flags:    pflag.NewFlagSet("", pflag.ContinueOnError),
 		baseName: baseName,
 	}
-
+	// zhou: namespace the velero will be installed.
 	f.namespace = os.Getenv("VELERO_NAMESPACE")
 	if config.Namespace() != "" {
 		f.namespace = config.Namespace()
@@ -108,15 +114,18 @@ func (f *factory) BindFlags(flags *pflag.FlagSet) {
 	flags.AddFlagSet(f.flags)
 }
 
+// zhou: similar with "sigs.k8s.io/controller-runtime/pkg/client/config.GetConfigOrDie()"
 func (f *factory) ClientConfig() (*rest.Config, error) {
 	return Config(f.kubeconfig, f.kubecontext, f.baseName, f.clientQPS, f.clientBurst)
 }
 
+// zhou: clientset for k8s internal resources, no cache, fetch from api server directly.
 func (f *factory) KubeClient() (kubernetes.Interface, error) {
 	clientConfig, err := f.ClientConfig()
 	if err != nil {
 		return nil, err
 	}
+	// zhou: create clientset
 	kubeClient, err := kubernetes.NewForConfig(clientConfig)
 
 	if err != nil {
@@ -125,6 +134,7 @@ func (f *factory) KubeClient() (kubernetes.Interface, error) {
 	return kubeClient, nil
 }
 
+// zhou: used to backup/restore user specified resources
 func (f *factory) DynamicClient() (dynamic.Interface, error) {
 	clientConfig, err := f.ClientConfig()
 	if err != nil {
@@ -137,6 +147,10 @@ func (f *factory) DynamicClient() (dynamic.Interface, error) {
 	return dynamicClient, nil
 }
 
+// zhou: only BackupStorageLocation/DownloadRequest/ServerStatusRequest using controller
+//
+//	runtime.
+//	Other velero CRD still have to be operated via clientset.
 func (f *factory) KubebuilderClient() (kbclient.Client, error) {
 	clientConfig, err := f.ClientConfig()
 	if err != nil {
@@ -162,6 +176,11 @@ func (f *factory) KubebuilderClient() (kbclient.Client, error) {
 	if err := snapshotv1api.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
+
+	// zhou: controller-runtime client which directly read/write from apiserver
+	//       This client doesn't have cache.
+	//       The read cached client created from manager->cluster->GetClient().
+
 	kubebuilderClient, err := kbclient.New(clientConfig, kbclient.Options{
 		Scheme: scheme,
 	})

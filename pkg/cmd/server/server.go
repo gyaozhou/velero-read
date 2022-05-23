@@ -89,10 +89,12 @@ func NewCommand(f client.Factory) *cobra.Command {
 	config := config.GetDefaultConfig()
 
 	var command = &cobra.Command{
-		Use:    "server",
-		Short:  "Run the velero server",
-		Long:   "Run the velero server",
+		Use:   "server",
+		Short: "Run the velero server",
+		Long:  "Run the velero server",
+		// zhou: don't show in help of command "velero help"
 		Hidden: true,
+		// zhou: once this command be invoked, run in container "velero"
 		Run: func(c *cobra.Command, args []string) {
 			// go-plugin uses log.Println to log when it's waiting for all plugin processes to complete so we need to
 			// set its output to stdout.
@@ -106,7 +108,6 @@ func NewCommand(f client.Factory) *cobra.Command {
 
 			// Velero's DefaultLogger logs to stdout, so all is good there.
 			logger := logging.DefaultLogger(logLevel, format)
-
 			logger.Infof("setting log-level to %s", strings.ToUpper(logLevel.String()))
 
 			logger.Infof("Starting Velero server %s (%s)", buildinfo.Version, buildinfo.FormattedGitSHA())
@@ -116,11 +117,14 @@ func NewCommand(f client.Factory) *cobra.Command {
 				logger.Info("No feature flags enabled")
 			}
 
-			f.SetBasename(fmt.Sprintf("%s-%s", c.Parent().Name(), c.Name()))
+			// zhou: velero-server
 
+			f.SetBasename(fmt.Sprintf("%s-%s", c.Parent().Name(), c.Name()))
+			// zhou: create velero server object
 			s, err := newServer(f, config, logger)
 			cmd.CheckError(err)
 
+			// zhou: running velero server object, main thread in container
 			cmd.CheckError(s.run())
 		},
 	}
@@ -131,12 +135,12 @@ func NewCommand(f client.Factory) *cobra.Command {
 }
 
 type server struct {
-	namespace        string
+	namespace        string // zhou: namespace which this server will watch and recocile objects within it. It is may different from where velero pod running.
 	metricsAddress   string
 	kubeClientConfig *rest.Config
-	kubeClient       kubernetes.Interface
+	kubeClient       kubernetes.Interface // zhou: clientset for k8s internal resource
 	discoveryClient  discovery.DiscoveryInterface
-	discoveryHelper  velerodiscovery.Helper
+	discoveryHelper  velerodiscovery.Helper // zhou: keep refresh discovery for every 5min.
 	dynamicClient    dynamic.Interface
 	// controller-runtime client. the difference from the controller-manager's client
 	// is that the controller-manager's client is limited to list namespaced-scoped
@@ -147,16 +151,18 @@ type server struct {
 	cancelFunc            context.CancelFunc
 	logger                logrus.FieldLogger
 	logLevel              logrus.Level
-	pluginRegistry        process.Registry
+	pluginRegistry        process.Registry // zhou: used to preserve each plugins' registered actions
 	repoManager           repomanager.Manager
 	repoLocker            *repository.RepoLocker
 	repoEnsurer           *repository.Ensurer
 	metrics               *metrics.ServerMetrics
 	config                *config.Config
 	mgr                   manager.Manager
-	credentialFileStore   credentials.FileStore
+	credentialFileStore   credentials.FileStore // zhou: handler to read credential files in local fs.
 	credentialSecretStore credentials.SecretStore
 }
+
+// zhou: init velero server
 
 func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (*server, error) {
 	if msg, err := uploader.ValidateUploaderType(config.UploaderType); err != nil {
@@ -174,6 +180,8 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 		return nil, errors.New("client-burst must be positive")
 	}
 	f.SetClientBurst(config.ClientBurst)
+
+	// zhou: used by clientgo/tools/pager, which works like "List()", but can limit the size for a request.
 
 	if config.ClientPageSize < 0 {
 		return nil, errors.New("client-page-size must not be negative")
@@ -194,7 +202,13 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 		return nil, err
 	}
 
+	// zhou: clientmgmt used to manage Plugins
+
 	pluginRegistry := process.NewRegistry(config.PluginDir, logger, logger.Level)
+
+	// zhou: discovery each plugins' identifier, which service they implmented.
+	//       Fill these information into "clientmgmt".
+
 	if err := pluginRegistry.DiscoverPlugins(); err != nil {
 		return nil, err
 	}
@@ -210,6 +224,8 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 		cancelFunc()
 		return nil, err
 	}
+
+	// zhou: controller runtime style
 
 	scheme := runtime.NewScheme()
 	if err := velerov1api.AddToScheme(scheme); err != nil {
@@ -252,6 +268,9 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 		return nil, err
 	}
 
+	// zhou: create handler used to read SecretKeySelector and create credential file in
+	//       "/tmp/credentials/[namespace]/[secret name]-[key name]".
+	//
 	credentialFileStore, err := credentials.NewNamespacedFileStore(
 		mgr.GetClient(),
 		f.Namespace(),
@@ -297,8 +316,11 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 	return s, nil
 }
 
+// zhou: main thread of container velero
 func (s *server) run() error {
 	signals.CancelOnShutdown(s.cancelFunc, s.logger)
+
+	// zhou: start profiler server
 
 	if s.config.ProfilerAddress != "" {
 		go s.runProfiler()
@@ -310,16 +332,20 @@ func (s *server) run() error {
 	if err := s.namespaceExists(s.namespace); err != nil {
 		return err
 	}
-
+	// zhou: keep refreshing installed GVK in k8s.
 	if err := s.initDiscoveryHelper(); err != nil {
 		return err
 	}
-
+	// zhou: check velero CRD installed
 	if err := s.veleroResourcesExist(); err != nil {
 		return err
 	}
 
 	s.checkNodeAgent()
+
+	// zhou: TBD, here is not launch restic server (DaemonSet), which is handled in "velero install"
+	//       in case of "use-restic" specified in cli.
+	//       Here is init restic repository manager.
 
 	if err := s.initRepoManager(); err != nil {
 		return err
@@ -328,6 +354,8 @@ func (s *server) run() error {
 	if err := s.setupBeforeControllerRun(); err != nil {
 		return err
 	}
+
+	// zhou: "defaultVolumeSnapshotLocations" may be empty
 
 	if err := s.runControllers(s.config.DefaultVolumeSnapshotLocations.Data()); err != nil {
 		return err
@@ -394,6 +422,8 @@ func (s *server) namespaceExists(namespace string) error {
 	return nil
 }
 
+// zhou: discovery keep refreshing the resouce type for every 5 min.
+
 // initDiscoveryHelper instantiates the server's discovery helper and spawns a
 // goroutine to call Refresh() every 5 minutes.
 func (s *server) initDiscoveryHelper() error {
@@ -415,6 +445,8 @@ func (s *server) initDiscoveryHelper() error {
 
 	return nil
 }
+
+// zhou: chech whether Velero CRD already installed !!!
 
 // veleroResourcesExist checks for the existence of each Velero CRD via discovery
 // and returns an error if any of them don't exist.
@@ -439,6 +471,9 @@ func (s *server) veleroResourcesExist() error {
 	var errs []error
 	for gv, resources := range gvResources {
 		for kind := range resources {
+
+			// zhou: part of velero CRD are not installed
+
 			errs = append(errs, errors.Errorf("custom resource %s not found in Velero API group %s", kind, gv))
 		}
 	}
@@ -461,7 +496,12 @@ func (s *server) checkNodeAgent() {
 	}
 }
 
+// zhou:  TBD, init restic repository manager no matter whether restic is enabled or not.
+
 func (s *server) initRepoManager() error {
+
+	// zhou: check and create a default secret for restic repo.
+
 	// ensure the repo key secret is set up
 	if err := repokey.EnsureCommonRepositoryKey(s.kubeClient.CoreV1(), s.namespace); err != nil {
 		return err
@@ -488,9 +528,12 @@ func (s *server) initRepoManager() error {
 	return nil
 }
 
+// zhou: start all controllers
+
 func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string) error {
 	s.logger.Info("Starting controllers")
 
+	// zhou: velero server owns two http servers, one for metrics, another for profiler.
 	go func() {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())
@@ -504,23 +547,37 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.logger.Fatalf("Failed to start metric server at [%s]: %v", s.metricsAddress, err)
 		}
 	}()
+	// zhou: here defines the metrics need to expose
 	s.metrics = metrics.NewServerMetrics()
 	s.metrics.RegisterAllMetrics()
 	// Initialize manual backup metrics
 	s.metrics.InitSchedule("")
 
+	// zhou: anonymous function to create plugin manager
 	newPluginManager := func(logger logrus.FieldLogger) clientmgmt.Manager {
 		return clientmgmt.NewManager(logger, s.logLevel, s.pluginRegistry)
 	}
 
+	// zhou: just create a "Getter" with credential utility.
+	//       The returned "Getter" could be used to "Get()" BSL specified "objectBackupStore"
+	//       with PluginManager.
 	backupStoreGetter := persistence.NewObjectBackupStoreGetter(s.credentialFileStore)
 
+	// zhou: pointer to "type backupTracker struct {}"
+
 	backupTracker := controller.NewBackupTracker()
+
+	// zhou: controllers implemented NOT using controller-runtime.
 
 	// By far, PodVolumeBackup, PodVolumeRestore, BackupStorageLocation controllers
 	// are not included in --disable-controllers list.
 	// This is because of PVB and PVR are used by node agent DaemonSet,
 	// and BSL controller is mandatory for Velero to work.
+
+	// zhou: controllers implemented using controller-runtime.
+	//       BackupStorageLocation controller is also implemented by controller-runtime, but can't
+	//       be disabled.
+
 	// Note: all runtime type controllers that can be disabled are grouped separately, below:
 	enabledRuntimeControllers := map[string]struct{}{
 		constant.ControllerBackup:              {},
@@ -550,6 +607,8 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		)
 	}
 
+	// zhou: remove disabledControllers from both enabledControllers and enabledRuntimeControllers.
+
 	// Remove disabled controllers so they are not initialized. If a match is not found we want
 	// to halt the system so the user knows this operation was not possible.
 	if err := removeControllers(s.config.DisabledControllers, enabledRuntimeControllers, s.logger); err != nil {
@@ -557,6 +616,9 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 	}
 
 	// Enable BSL controller. No need to check whether it's enabled or not.
+
+	// zhou: all these controllers are implemented upon controller-runtime
+
 	bslr := controller.NewBackupStorageLocationReconciler(
 		s.ctx,
 		s.mgr.GetClient(),
@@ -625,6 +687,8 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.logger.Fatal(err, "unable to create controller", "controller", constant.ControllerBackup)
 		}
 	}
+
+	// zhou: backup deletion controller
 
 	if _, ok := enabledRuntimeControllers[constant.ControllerBackupDeletion]; ok {
 		if err := controller.NewBackupDeletionReconciler(
@@ -860,6 +924,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 
 	s.logger.Info("Server starting...")
 
+	// zhou: wait until cache synced, then all controllers start to work.
 	if err := s.mgr.Start(s.ctx); err != nil {
 		s.logger.Fatal("Problem starting manager", err)
 	}
@@ -882,6 +947,7 @@ func removeControllers(disabledControllers []string, enabledRuntimeControllers m
 	return nil
 }
 
+// zhou: pprof server
 func (s *server) runProfiler() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)

@@ -34,9 +34,12 @@ type BackupTracker interface {
 }
 
 type backupTracker struct {
+	// zhou: lock to protect "backups".
 	lock    sync.RWMutex
 	backups sets.Set[string]
 }
+
+// zhou: shared globally, return the pointer, and the methods are implemented using pointer.
 
 // NewBackupTracker returns a new BackupTracker.
 func NewBackupTracker() BackupTracker {

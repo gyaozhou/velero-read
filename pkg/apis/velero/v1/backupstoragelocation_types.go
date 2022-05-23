@@ -31,11 +31,18 @@ type BackupStorageLocationSpec struct {
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
 
+	// zhou: specify the Secret and the key whose value store credential.
+
 	// Credential contains the credential information intended to be used with this location
 	// +optional
 	Credential *corev1api.SecretKeySelector `json:"credential,omitempty"`
 
+	// zhou: MUST be filled. object storage parameters
+
 	StorageType `json:",inline"`
+
+	// zhou: set as default BSL. It is different from the default BSL set when installation.
+	//       When multiply BSL set this value as true, then it will confuse velero.
 
 	// Default indicates this location is the default backup storage location.
 	// +optional
@@ -49,6 +56,8 @@ type BackupStorageLocationSpec struct {
 	// +optional
 	// +nullable
 	BackupSyncPeriod *metav1.Duration `json:"backupSyncPeriod,omitempty"`
+
+	// zhou:
 
 	// ValidationFrequency defines how frequently to validate the corresponding object storage. A value of 0 disables validation.
 	// +optional
@@ -107,6 +116,8 @@ type BackupStorageLocationStatus struct {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Default",type="boolean",JSONPath=".spec.default",description="Default backup storage location"
 
+// zhou: used to describe object storage
+
 // BackupStorageLocation is a location where Velero stores backup objects
 type BackupStorageLocation struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -135,6 +146,9 @@ type BackupStorageLocationList struct {
 type StorageType struct {
 	ObjectStorage *ObjectStorageLocation `json:"objectStorage"`
 }
+
+// zhou: these fields will be passed to plugin with spec.config, but MUST be supported by
+//       Object Store plugin.
 
 // ObjectStorageLocation specifies the settings necessary to connect to a provider's object storage.
 type ObjectStorageLocation struct {

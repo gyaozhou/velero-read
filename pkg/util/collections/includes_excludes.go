@@ -59,9 +59,12 @@ func (gss globStringSet) match(match string) bool {
 // should be included. '*' in the includes list means "include
 // everything", but it is not valid in the exclude list.
 type IncludesExcludes struct {
+	// zhou: '*' in the includes list means "include everything"
 	includes globStringSet
 	excludes globStringSet
 }
+
+// zhou: e.g. used to handle include/exclude namespace.
 
 func NewIncludesExcludes() *IncludesExcludes {
 	return &IncludesExcludes{
@@ -97,9 +100,12 @@ func (ie *IncludesExcludes) GetExcludes() []string {
 // included or not. Everything in the includes list except those
 // items in the excludes list should be included.
 func (ie *IncludesExcludes) ShouldInclude(s string) bool {
+	// zhou: even it is also in includes list, it still be excluded.
 	if ie.excludes.match(s) {
 		return false
 	}
+
+	// zhou: the "s" NOT match "includes", will return false.
 
 	// len=0 means include everything
 	return ie.includes.Len() == 0 || ie.includes.Has("*") || ie.includes.match(s)
@@ -302,6 +308,8 @@ func newScopeIncludesExcludes(nsIncludesExcludes IncludesExcludes, helper discov
 	return ret
 }
 
+// zhou: make sure the includes list and excluded list does not conflict.
+
 // ValidateIncludesExcludes checks provided lists of included and excluded
 // items to ensure they are a valid set of IncludesExcludes data.
 func ValidateIncludesExcludes(includesList, excludesList []string) []error {
@@ -413,6 +421,7 @@ func generateIncludesExcludes(includes, excludes []string, mapFunc func(string) 
 	res := NewIncludesExcludes()
 
 	for _, item := range includes {
+		// zhou: "*" is acceptable
 		if item == "*" {
 			res.Includes(item)
 			continue
@@ -470,23 +479,31 @@ func generateFilter(filter globStringSet, resources []string, mapFunc func(strin
 	}
 }
 
+// zhou: plugins only privdes resource name as "services" "svc", this function resolve them
+//       to fully-qualified group-resource names with "discovery.Helper".
+
 // GetResourceIncludesExcludes takes the lists of resources to include and exclude, uses the
 // discovery helper to resolve them to fully-qualified group-resource names, and returns an
 // IncludesExcludes list.
 func GetResourceIncludesExcludes(helper discovery.Helper, includes, excludes []string) *IncludesExcludes {
+
 	resources := generateIncludesExcludes(
 		includes,
 		excludes,
 		func(item string) string {
+			// zhou: schema.ParseGroupResource() could split string "resource.group".
+			//       Then formalize it into gvr and APIResource.
 			gvr, _, err := helper.ResourceFor(schema.ParseGroupResource(item).WithVersion(""))
 			if err != nil {
+				// zhou: ???
+
 				// If we can't resolve it, return it as-is. This prevents the generated
 				// includes-excludes list from including *everything*, if none of the includes
 				// can be resolved. ref. https://github.com/vmware-tanzu/velero/issues/2461
 				return item
 			}
-
 			gr := gvr.GroupResource()
+			// zhou: "resource.group"
 			return gr.String()
 		},
 	)

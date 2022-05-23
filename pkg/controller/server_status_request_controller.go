@@ -73,6 +73,8 @@ func NewServerStatusRequestReconciler(
 	}
 }
 
+// zhou: used by cli to check server status?
+
 // +kubebuilder:rbac:groups=velero.io,resources=serverstatusrequests,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=velero.io,resources=serverstatusrequests/status,verbs=get;update;patch
 
@@ -115,6 +117,7 @@ func (r *serverStatusRequestReconciler) Reconcile(ctx context.Context, req ctrl.
 			return ctrl.Result{RequeueAfter: statusRequestResyncPeriod}, err
 		}
 	case velerov1api.ServerStatusRequestPhaseProcessed:
+		// zhou: since this CR will be requeued.
 		log.Debug("Checking whether ServerStatusRequest has expired")
 		expiration := statusRequest.Status.ProcessedTimestamp.Add(ttl)
 		if expiration.After(r.clock.Now()) {

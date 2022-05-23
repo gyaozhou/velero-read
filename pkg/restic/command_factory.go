@@ -85,6 +85,7 @@ func InitCommand(repoIdentifier string) *Command {
 	}
 }
 
+// zhou: restic -r xxx snapshots xx, get description of a snapshot, or list all snapshots.
 func SnapshotsCommand(repoIdentifier string) *Command {
 	return &Command{
 		Command:        "snapshots",

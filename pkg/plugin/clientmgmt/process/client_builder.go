@@ -32,6 +32,8 @@ import (
 	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/framework/restoreitemaction/v2"
 )
 
+// zhou: adpater of go-plugin
+
 // clientBuilder builds go-plugin Clients.
 type clientBuilder struct {
 	commandName  string
@@ -39,6 +41,8 @@ type clientBuilder struct {
 	clientLogger logrus.FieldLogger
 	pluginLogger hclog.Logger
 }
+
+// zhou: pass flags "features" and "log-level" to this command.
 
 // newClientBuilder returns a new clientBuilder with commandName to name. If the command matches the currently running
 // process (i.e. velero), this also sets commandArgs to the internal Velero command to run plugins.
@@ -48,6 +52,9 @@ func newClientBuilder(command string, logger logrus.FieldLogger, logLevel logrus
 		clientLogger: logger,
 		pluginLogger: newLogrusAdapter(logger, logLevel),
 	}
+	// zhou: some functions implemented using plugin framework, but compiled into velero binary.
+	//       For these pluguins, handle it "velero run-plugins".
+	//       It means, "velero server" will create subprocess "velero run-plugins" for interaction.
 	if command == os.Args[0] {
 		// For plugins compiled into the velero executable, we need to run "velero run-plugins"
 		b.commandArgs = []string{"run-plugins"}
@@ -62,6 +69,7 @@ func newLogrusAdapter(pluginLogger logrus.FieldLogger, logLevel logrus.Level) *l
 	return &logrusAdapter{impl: pluginLogger, level: logLevel}
 }
 
+// zhou: go-plugin grpc client config
 func (b *clientBuilder) clientConfig() *hcplugin.ClientConfig {
 	return &hcplugin.ClientConfig{
 		HandshakeConfig:  framework.Handshake(),

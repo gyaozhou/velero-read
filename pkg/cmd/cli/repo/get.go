@@ -30,6 +30,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 )
 
+// zhou: "velero restic repo get"
 func NewGetCommand(f client.Factory, use string) *cobra.Command {
 	var listOptions metav1.ListOptions
 
@@ -44,6 +45,9 @@ func NewGetCommand(f client.Factory, use string) *cobra.Command {
 			cmd.CheckError(err)
 
 			repos := new(api.BackupRepositoryList)
+
+			// zhou: "velero restic repo get repo1 repo2 repo3"
+
 			if len(args) > 0 {
 				for _, name := range args {
 					repo := new(api.BackupRepository)

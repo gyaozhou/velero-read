@@ -22,16 +22,24 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/client"
 )
 
+// zhou: velero backup create/get/describe/delete
 func NewCommand(f client.Factory) *cobra.Command {
 	c := &cobra.Command{
+		// zhou: this field specify the command format.
 		Use:   "backup",
 		Short: "Work with backups",
 		Long:  "Work with backups",
 	}
 
+	// zhou: add subcommands
 	c.AddCommand(
+		// zhou: shared subcommand,
+		//       "velero backup create ..." and "velero create backup ..."
 		NewCreateCommand(f, "create"),
+		// zhou: shared subcommand,
+		//       "velero backup get ..." and "velero get backup ..."
 		NewGetCommand(f, "get"),
+		// zhou: only be used as "velero backup log
 		NewLogsCommand(f),
 		NewDescribeCommand(f, "describe"),
 		NewDownloadCommand(f),

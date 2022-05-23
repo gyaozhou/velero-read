@@ -41,6 +41,8 @@ type ChosenGroupVersion struct {
 	Dir     string
 }
 
+// zhou: README,
+
 // chooseAPIVersionsToRestore will choose a version to restore based on a user-
 // provided config map prioritization or our version prioritization.
 func (ctx *restoreContext) chooseAPIVersionsToRestore() error {
@@ -147,6 +149,8 @@ OUTER:
 
 	return nil
 }
+
+// zhou: README,
 
 // gatherSourceTargetUserGroupVersions collects the source, target, and user priority versions.
 func (ctx *restoreContext) gatherSourceTargetUserGroupVersions() (

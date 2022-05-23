@@ -44,9 +44,13 @@ type namespacedFileStore struct {
 	fs        filesystem.Interface
 }
 
+// zhou: create handler used to read one key/value from Secret in "namespace" and
+//       generate credential file in "fsRoot".
+
 // NewNamespacedFileStore returns a FileStore which can interact with credentials
 // for the given namespace and will store them under the given fsRoot.
 func NewNamespacedFileStore(client kbclient.Client, namespace string, fsRoot string, fs filesystem.Interface) (FileStore, error) {
+	// zhou: by default "/tmp/credentials" + namespace
 	fsNamespaceRoot := filepath.Join(fsRoot, namespace)
 
 	if err := fs.MkdirAll(fsNamespaceRoot, 0755); err != nil {
@@ -61,14 +65,19 @@ func NewNamespacedFileStore(client kbclient.Client, namespace string, fsRoot str
 	}, nil
 }
 
+// zhou: create file "/tmp/credentials/[namespace]/[secret name]-[key name]".
+//       "selector" specify the name of secret and the key name, which corresponding value
+//       will be write to file.
+
 // Path returns a path on disk where the secret key defined by
 // the given selector is serialized.
 func (n *namespacedFileStore) Path(selector *corev1api.SecretKeySelector) (string, error) {
+	// zhou: get the value
 	creds, err := kube.GetSecretKey(n.client, n.namespace, selector)
 	if err != nil {
 		return "", errors.Wrap(err, "unable to get key for secret")
 	}
-
+	// zhou: write to file /tmp/credentials/[namespace]/[secret name]-[key name]
 	keyFilePath := filepath.Join(n.fsRoot, fmt.Sprintf("%s-%s", selector.Name, selector.Key))
 
 	file, err := n.fs.OpenFile(keyFilePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
