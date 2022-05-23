@@ -112,6 +112,7 @@ type PodVolumeRestoreStatus struct {
 // +kubebuilder:printcolumn:name="BytesDone",type="integer",format="int64",JSONPath=".status.progress.bytesDone",description="Pod Volume Restore status such as New/InProgress"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
+// zhou: restic restore
 type PodVolumeRestore struct {
 	metav1.TypeMeta `json:",inline"`
 

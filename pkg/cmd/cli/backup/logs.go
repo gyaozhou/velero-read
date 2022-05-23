@@ -41,6 +41,8 @@ type LogsOptions struct {
 	BackupName            string
 }
 
+// zhou: "velero backup logs xxx"
+
 func NewLogsOptions() LogsOptions {
 	config, err := client.LoadConfig()
 	if err != nil {

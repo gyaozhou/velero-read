@@ -41,13 +41,23 @@ import (
 	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
 )
 
+// zhou: implemented by "manager struct"
+
 // Manager manages the lifecycles of plugins.
 type Manager interface {
+	// zhou: get "PluginKindObjectStore" plugins' handler.
+	//       Only allow one BSL for a Backup CR.
+
 	// GetObjectStore returns the ObjectStore plugin for name.
 	GetObjectStore(name string) (velero.ObjectStore, error)
 
+	// zhou: get "PluginKindVolumeSnapshotter" plugins' handler.
+	//       Only allow one VSL for a Backup CR.
+
 	// GetVolumeSnapshotter returns the VolumeSnapshotter plugin for name.
 	GetVolumeSnapshotter(name string) (vsv1.VolumeSnapshotter, error)
+
+	// zhou: get "PluginKindBackupItemAction" plugins' handler.
 
 	// GetBackupItemActions returns all v1 backup item action plugins.
 	GetBackupItemActions() ([]biav1.BackupItemAction, error)
@@ -61,6 +71,8 @@ type Manager interface {
 	// GetBackupItemActionV2 returns the backup item action plugin for name.
 	GetBackupItemActionV2(name string) (biav2.BackupItemAction, error)
 
+	// zhou: get "PluginKindRestoreItemAction" plugins' handler.
+
 	// GetRestoreItemActions returns all restore item action plugins.
 	GetRestoreItemActions() ([]riav1.RestoreItemAction, error)
 
@@ -72,6 +84,8 @@ type Manager interface {
 
 	// GetRestoreItemActionV2 returns the restore item action plugin for name.
 	GetRestoreItemActionV2(name string) (riav2.RestoreItemAction, error)
+
+	// zhou: get "PluginKindDeleteItemAction" plugins' handler.
 
 	// GetDeleteItemActions returns all delete item action plugins.
 	GetDeleteItemActions() ([]velero.DeleteItemAction, error)
@@ -96,14 +110,23 @@ var pluginNotFoundErrType = &process.PluginNotFoundError{}
 type manager struct {
 	logger   logrus.FieldLogger
 	logLevel logrus.Level
+
+	// zhou: "clientmgmt.registry"
+
 	registry process.Registry
 
 	restartableProcessFactory process.RestartableProcessFactory
 
 	// lock guards restartableProcesses
-	lock                 sync.Mutex
+	lock sync.Mutex
+
+	// zhou: all running Plugin Binary process within a PluginManager,
+	//       "Plugin bianary name" -> "RestartableProcess"
+
 	restartableProcesses map[string]process.RestartableProcess
 }
+
+// zhou: create plugin clients manager instance.
 
 // NewManager constructs a manager for getting plugins.
 func NewManager(logger logrus.FieldLogger, level logrus.Level, registry process.Registry) Manager {
@@ -118,6 +141,7 @@ func NewManager(logger logrus.FieldLogger, level logrus.Level, registry process.
 	}
 }
 
+// zhou: kill all plugin processes managed by this plugin manager.
 func (m *manager) CleanupClients() {
 	m.lock.Lock()
 
@@ -127,6 +151,11 @@ func (m *manager) CleanupClients() {
 
 	m.lock.Unlock()
 }
+
+// zhou: get plugin's "RestartableProcess" by PluginKind and Registered plugin name,
+//       start it if not running.
+//       The process's lifecycle is managed by plugin manager, and plugin manager is always created
+//       by each Reconcile().
 
 // getRestartableProcess returns a restartableProcess for a plugin identified by kind and name, creating a
 // restartableProcess if it is the first time it has been requested.
@@ -140,6 +169,7 @@ func (m *manager) getRestartableProcess(kind common.PluginKind, name string) (pr
 	})
 	logger.Debug("looking for plugin in registry")
 
+	// zhou: get 'PluginIdentifier" by PluginKind and registered plugin name.
 	info, err := m.registry.Get(kind, name)
 	if err != nil {
 		return nil, err
@@ -147,6 +177,7 @@ func (m *manager) getRestartableProcess(kind common.PluginKind, name string) (pr
 
 	logger = logger.WithField("command", info.Command)
 
+	// zhou: check whether plugin process created before.
 	restartableProcess, found := m.restartableProcesses[info.Command]
 	if found {
 		logger.Debug("found preexisting restartable plugin process")
@@ -154,6 +185,8 @@ func (m *manager) getRestartableProcess(kind common.PluginKind, name string) (pr
 	}
 
 	logger.Debug("creating new restartable plugin process")
+
+	// zhou: if there is no corresponding process for this plugin, create it.
 
 	restartableProcess, err = m.restartableProcessFactory.NewRestartableProcess(info.Command, m.logger, m.logLevel)
 	if err != nil {
@@ -165,8 +198,13 @@ func (m *manager) getRestartableProcess(kind common.PluginKind, name string) (pr
 	return restartableProcess, nil
 }
 
+// zhou: used by "objectBackupStoreGetter.Get()", e.g. "name" == "aws"
+//       only allow one BSL for one Backup CR.
+
 // GetObjectStore returns a restartableObjectStore for name.
 func (m *manager) GetObjectStore(name string) (velero.ObjectStore, error) {
+	// zhou: transform to "velero.io/aws", which is same as velero-plugin-for-aws implemented:
+	//       'RegisterObjectStore("velero.io/aws", newAwsObjectStore) '
 	name = sanitizeName(name)
 
 	restartableProcess, err := m.getRestartableProcess(common.PluginKindObjectStore, name)
@@ -178,6 +216,8 @@ func (m *manager) GetObjectStore(name string) (velero.ObjectStore, error) {
 
 	return r, nil
 }
+
+// zhou: "name" is VSL. Only allow one VSL for one Backup CR.
 
 // GetVolumeSnapshotter returns a restartableVolumeSnapshotter for name.
 func (m *manager) GetVolumeSnapshotter(name string) (vsv1.VolumeSnapshotter, error) {
@@ -197,12 +237,15 @@ func (m *manager) GetVolumeSnapshotter(name string) (vsv1.VolumeSnapshotter, err
 	return nil, fmt.Errorf("unable to get valid VolumeSnapshotter for %q", name)
 }
 
+// zhou: get all registered "BackItemAction" plugins' rpc call instances.
+
 // GetBackupItemActions returns all backup item actions as restartableBackupItemActions.
 func (m *manager) GetBackupItemActions() ([]biav1.BackupItemAction, error) {
 	list := m.registry.List(common.PluginKindBackupItemAction)
 
 	actions := make([]biav1.BackupItemAction, 0, len(list))
 
+	// zhou: why not "for _, id := range list" ???
 	for i := range list {
 		id := list[i]
 
@@ -217,11 +260,14 @@ func (m *manager) GetBackupItemActions() ([]biav1.BackupItemAction, error) {
 	return actions, nil
 }
 
+// zhou: get rpc call instance, by "registered plugin name" like "velero.io/csi-pvc-backupper"
+
 // GetBackupItemAction returns a restartableBackupItemAction for name.
 func (m *manager) GetBackupItemAction(name string) (biav1.BackupItemAction, error) {
 	name = sanitizeName(name)
 
 	for _, adaptedBackupItemAction := range biav1cli.AdaptedBackupItemActions() {
+		// zhou: process used to talk
 		restartableProcess, err := m.getRestartableProcess(adaptedBackupItemAction.Kind, name)
 		// Check if plugin was not found
 		if errors.As(err, &pluginNotFoundErrType) {
@@ -272,6 +318,8 @@ func (m *manager) GetBackupItemActionV2(name string) (biav2.BackupItemAction, er
 	}
 	return nil, fmt.Errorf("unable to get valid BackupItemActionV2 for %q", name)
 }
+
+// zhou: get all handlers of plugins which "RegisterRestoreItemAction()"
 
 // GetRestoreItemActions returns all restore item actions as restartableRestoreItemActions.
 func (m *manager) GetRestoreItemActions() ([]riav1.RestoreItemAction, error) {
@@ -348,6 +396,8 @@ func (m *manager) GetRestoreItemActionV2(name string) (riav2.RestoreItemAction, 
 	}
 	return nil, fmt.Errorf("unable to get valid RestoreItemActionV2 for %q", name)
 }
+
+// zhou: get all handlers of plugins which "RegisterDeleteItemAction()"
 
 // GetDeleteItemActions returns all delete item actions as restartableDeleteItemActions.
 func (m *manager) GetDeleteItemActions() ([]velero.DeleteItemAction, error) {

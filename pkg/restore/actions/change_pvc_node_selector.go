@@ -30,6 +30,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/change-pvc-node-selector"}
+
 // ChangePVCNodeSelectorAction updates/reset PVC's node selector
 // if a mapping is found in the plugin's config map.
 type ChangePVCNodeSelectorAction struct {

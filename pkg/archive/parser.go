@@ -38,6 +38,8 @@ type Parser struct {
 	fs  filesystem.Interface
 }
 
+// zhou:
+
 // ResourceItems contains the collection of items of a given resource type
 // within a backup, grouped by namespace (or empty string for cluster-scoped
 // resources).
@@ -61,6 +63,8 @@ func NewParser(log logrus.FieldLogger, fs filesystem.Interface) *Parser {
 		fs:  fs,
 	}
 }
+
+// zhou: README,
 
 // Parse reads an extracted backup on the file system and returns
 // a structured catalog of the resources and items contained within it.

@@ -27,6 +27,8 @@ import (
 	"github.com/vmware-tanzu/velero/internal/velero"
 )
 
+// zhou: "cli install" will create and install this DaemonSet to run restic server
+
 func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 	c := &podTemplateConfig{
 		image: velero.DefaultVeleroImage(),
@@ -53,6 +55,8 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 	if len(c.nodeAgentConfigMap) > 0 {
 		daemonSetArgs = append(daemonSetArgs, fmt.Sprintf("--node-agent-configmap=%s", c.nodeAgentConfigMap))
 	}
+
+	// zhou: work as root?
 
 	userID := int64(0)
 	mountPropagationMode := corev1.MountPropagationHostToContainer
@@ -87,6 +91,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsUser: &userID,
 					},
+					// zhou: need to access host path "/var/lib/kubelet/pods"
 					Volumes: []corev1.Volume{
 						{
 							Name: "host-pods",
@@ -170,6 +175,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 		},
 	}
 
+	// zhou: user specify "secret-file" in flags.
 	if c.withSecret {
 		daemonSet.Spec.Template.Spec.Volumes = append(
 			daemonSet.Spec.Template.Spec.Volumes,
@@ -177,12 +183,13 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 				Name: "cloud-credentials",
 				VolumeSource: corev1.VolumeSource{
 					Secret: &corev1.SecretVolumeSource{
+						// zhou: must be in same Namespace with this Pod
 						SecretName: "cloud-credentials",
 					},
 				},
 			},
 		)
-
+		// zhou: default sercet key "cloud" will be accessed via "/credentials/cloud"
 		daemonSet.Spec.Template.Spec.Containers[0].VolumeMounts = append(
 			daemonSet.Spec.Template.Spec.Containers[0].VolumeMounts,
 			corev1.VolumeMount{
@@ -191,6 +198,8 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 			},
 		)
 
+		// zhou: set default value for these env, it could be overwrite when BSL specify
+		//       private credential. But who will use the value???
 		daemonSet.Spec.Template.Spec.Containers[0].Env = append(daemonSet.Spec.Template.Spec.Containers[0].Env, []corev1.EnvVar{
 			{
 				Name:  "GOOGLE_APPLICATION_CREDENTIALS",

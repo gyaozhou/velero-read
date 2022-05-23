@@ -33,6 +33,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/change-storage-class"}
+
 // ChangeStorageClassAction updates a PV or PVC's storage class name
 // if a mapping is found in the plugin's config map.
 type ChangeStorageClassAction struct {
@@ -40,6 +42,9 @@ type ChangeStorageClassAction struct {
 	configMapClient    corev1client.ConfigMapInterface
 	storageClassClient storagev1client.StorageClassInterface
 }
+
+// zhou: get struct{} implemented PluginKind "PluginKindBackupItemAction" interface
+//       "type BackupItemAction interface"
 
 // NewChangeStorageClassAction is the constructor for ChangeStorageClassAction.
 func NewChangeStorageClassAction(
@@ -61,6 +66,8 @@ func (a *ChangeStorageClassAction) AppliesTo() (velero.ResourceSelector, error) 
 		IncludedResources: []string{"persistentvolumeclaims", "persistentvolumes", "statefulsets"},
 	}, nil
 }
+
+// zhou: README,
 
 // Execute updates the item's spec.storageClassName if a mapping is found
 // in the config map for the plugin.
@@ -132,11 +139,14 @@ func (a *ChangeStorageClassAction) Execute(input *velero.RestoreItemActionExecut
 		}
 
 		log.Infof("Updating item's storage class name to %s", newStorageClass)
-
+		// zhou: set pvc/pv spec.storageClassName as "newStorageClass"
 		if err := unstructured.SetNestedField(obj.UnstructuredContent(), newStorageClass, "spec", "storageClassName"); err != nil {
 			return nil, errors.Wrap(err, "unable to set item's spec.storageClassName")
 		}
 	}
+
+	// zhou: no need to update apiserver directly, velero restore controller will handle it.
+
 	return velero.NewRestoreItemActionExecuteOutput(obj), nil
 }
 

@@ -44,10 +44,13 @@ var rawCRDs = [][]byte{
 
 var CRDs = crds()
 
+// zhou: due to velero delivers only a single binary, the CRD yaml file has been packed into
+//       "rawCRDs". This function converts it to objects.
 func crds() []*apiextv1.CustomResourceDefinition {
 	apiextinstall.Install(scheme.Scheme)
 	decode := scheme.Codecs.UniversalDeserializer().Decode
 	var objs []*apiextv1.CustomResourceDefinition
+
 	for _, crd := range rawCRDs {
 		gzr, err := gzip.NewReader(bytes.NewReader(crd))
 		if err != nil {

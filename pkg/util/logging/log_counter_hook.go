@@ -26,6 +26,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
 
+// zhou: logrus hook to count each level.
+
 // LogHook is a logrus hook that counts the number of log
 // statements that have been written at each logrus level. It also
 // maintains log entries at each logrus level in result structure.

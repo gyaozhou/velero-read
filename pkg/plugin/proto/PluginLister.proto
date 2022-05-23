@@ -14,6 +14,7 @@ message ListPluginsResponse {
   repeated PluginIdentifier plugins = 1;
 }
 
+// zhou:
 service PluginLister {
   rpc ListPlugins(Empty) returns (ListPluginsResponse);
 }

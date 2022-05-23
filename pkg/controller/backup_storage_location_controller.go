@@ -49,6 +49,9 @@ type backupStorageLocationReconciler struct {
 	ctx                       context.Context
 	client                    client.Client
 	defaultBackupLocationInfo storage.DefaultBackupLocationInfo
+
+	// zhou: !!!
+
 	// use variables to refer to these functions so they can be
 	// replaced with fakes for testing.
 	newPluginManager  func(logrus.FieldLogger) clientmgmt.Manager
@@ -74,6 +77,8 @@ func NewBackupStorageLocationReconciler(
 		log:                       log,
 	}
 }
+
+// zhou: just validate BSL accesbile, and it's better has default one.
 
 // +kubebuilder:rbac:groups=velero.io,resources=backupstoragelocations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=velero.io,resources=backupstoragelocations/status,verbs=get;update;patch
@@ -152,6 +157,8 @@ func (r *backupStorageLocationReconciler) Reconcile(ctx context.Context, req ctr
 
 	return ctrl.Result{}, nil
 }
+
+// zhou: check any valid BSL existing, and any default BSL existing.
 
 func (r *backupStorageLocationReconciler) logReconciledPhase(defaultFound bool, locationList velerov1api.BackupStorageLocationList, errs []string) {
 	var availableBSLs []*velerov1api.BackupStorageLocation

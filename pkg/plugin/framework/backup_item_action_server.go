@@ -50,6 +50,8 @@ func (s *BackupItemActionGRPCServer) getImpl(name string) (biav1.BackupItemActio
 	return itemAction, nil
 }
 
+// zhou: invoked in plugin server (also is grpc server)
+
 func (s *BackupItemActionGRPCServer) AppliesTo(
 	ctx context.Context, req *proto.BackupItemActionAppliesToRequest) (
 	response *proto.BackupItemActionAppliesToResponse, err error) {

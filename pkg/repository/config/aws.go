@@ -49,13 +49,18 @@ const (
 	awsDefaultProfile        = "default"
 )
 
+// zhou: this env is set in "pkg/install/daemonset" and "pkg/install/deployment"
+
 // GetS3ResticEnvVars gets the environment variables that restic
 // relies on (AWS_PROFILE) based on info in the provided object
 // storage location config map.
 func GetS3ResticEnvVars(config map[string]string) (map[string]string, error) {
 	result := make(map[string]string)
 
+	// zhou: whether BSL using private credential
+
 	if credentialsFile, ok := config[CredentialsFileKey]; ok {
+		// zhou: overwrite "/credentials/cloud" which set in DaemonSet.
 		result[awsCredentialsFileEnvVar] = credentialsFile
 	}
 

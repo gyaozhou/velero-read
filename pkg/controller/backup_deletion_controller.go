@@ -165,6 +165,8 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, kubeerrs.NewAggregate(errs)
 	}
 
+	// zhou: why not track an in-progress restore ?
+
 	// Don't allow deleting an in-progress backup
 	if r.backupTracker.Contains(dbr.Namespace, dbr.Spec.BackupName) {
 		err := r.patchDeleteBackupRequestWithError(ctx, dbr, errors.New("backup is still in progress"))
@@ -209,12 +211,14 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	// Update status to InProgress and set backup-name and backup-uid label if needed
 	dbr, err := r.patchDeleteBackupRequest(ctx, dbr, func(r *velerov1api.DeleteBackupRequest) {
+		// zhou: pass all validation, add label "velero.io/backup-name"
 		r.Status.Phase = velerov1api.DeleteBackupRequestPhaseInProgress
 
 		if r.Labels[velerov1api.BackupNameLabel] == "" {
 			r.Labels[velerov1api.BackupNameLabel] = label.GetValidName(dbr.Spec.BackupName)
 		}
 
+		// zhou: why not add label in last step ? Avoid patch failed?
 		if r.Labels[velerov1api.BackupUIDLabel] == "" {
 			r.Labels[velerov1api.BackupUIDLabel] = string(backup.UID)
 		}
@@ -236,6 +240,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	backupScheduleName := backup.GetLabels()[velerov1api.ScheduleNameLabel]
 	r.metrics.RegisterBackupDeletionAttempt(backupScheduleName)
 
+	// zhou: need to access object store
 	pluginManager := r.newPluginManager(log)
 	defer pluginManager.CleanupClients()
 
@@ -246,6 +251,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err2
 	}
 
+	// zhou: ???
 	actions, err := pluginManager.GetDeleteItemActions()
 	log.Debugf("%d actions before invoking actions", len(actions))
 	if err != nil {
@@ -289,6 +295,8 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	// zhou: remove from VSL, CSI snapshot already be handled in delete actions
+
 	if backupStore != nil {
 		log.Info("Removing PV snapshots")
 
@@ -315,6 +323,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 		}
 	}
+	// zhou: remove restic backeduped snapshot
 	log.Info("Removing pod volume snapshots")
 	if deleteErrs := r.deletePodVolumeSnapshots(ctx, backup); len(deleteErrs) > 0 {
 		for _, err := range deleteErrs {
@@ -349,6 +358,8 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	// zhou: remove backup CR from obejct store
+
 	if backupStore != nil {
 		log.Info("Removing backup from backup storage")
 		if err := backupStore.DeleteBackup(backup.Name); err != nil {
@@ -356,6 +367,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	// zhou: remove restore CR from cluster
 	log.Info("Removing restores")
 	restoreList := &velerov1api.RestoreList{}
 	selector := labels.Everything()
@@ -406,6 +418,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	// zhou: remove backup CR from cluster
 	if len(errs) == 0 {
 		// Only try to delete the backup object from kube if everything preceding went smoothly
 		if err := r.Delete(ctx, backup); err != nil {
@@ -419,6 +432,8 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		r.metrics.RegisterBackupDeletionFailed(backupScheduleName)
 	}
 
+	// zhou: update this CR status
+
 	// Update status to processed and record errors
 	if _, err := r.patchDeleteBackupRequest(ctx, dbr, func(r *velerov1api.DeleteBackupRequest) {
 		r.Status.Phase = velerov1api.DeleteBackupRequestPhaseProcessed
@@ -426,6 +441,9 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	// zhou: delete this CR if no error
+
 	// Everything deleted correctly, so we can delete all DeleteBackupRequests for this backup
 	if len(errs) == 0 {
 		labelSelector, err := labels.Parse(fmt.Sprintf("%s=%s,%s=%s", velerov1api.BackupNameLabel, label.GetValidName(backup.Name), velerov1api.BackupUIDLabel, backup.UID))
@@ -447,6 +465,8 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	return ctrl.Result{}, nil
 }
+
+// zhou: README,
 
 func (r *backupDeletionReconciler) volumeSnapshottersForVSL(
 	ctx context.Context,
@@ -479,6 +499,8 @@ func (r *backupDeletionReconciler) volumeSnapshottersForVSL(
 	return volumeSnapshotter, nil
 }
 
+// zhou: delete other DeleteBackupRequest for the same backup.
+
 func (r *backupDeletionReconciler) deleteExistingDeletionRequests(ctx context.Context, req *velerov1api.DeleteBackupRequest, log logrus.FieldLogger) []error {
 	log.Info("Removing existing deletion requests for backup")
 	dbrList := &velerov1api.DeleteBackupRequestList{}
@@ -491,6 +513,7 @@ func (r *backupDeletionReconciler) deleteExistingDeletionRequests(ctx context.Co
 	}
 	var errs []error
 	for i, dbr := range dbrList.Items {
+		// zhou: ignore current DeleteBackupRequst
 		if dbr.Name == req.Name {
 			continue
 		}
@@ -521,10 +544,14 @@ func (r *backupDeletionReconciler) deleteCSIVolumeSnapshots(ctx context.Context,
 	return nil
 }
 
+// zhou: "restic forget"
+
 func (r *backupDeletionReconciler) deletePodVolumeSnapshots(ctx context.Context, backup *velerov1api.Backup) []error {
 	if r.repoMgr == nil {
 		return nil
 	}
+
+	// zhou: get restic snapshot id from PodVolumeBackup
 
 	directSnapshots, err := getSnapshotsInBackup(ctx, backup, r.Client)
 	if err != nil {

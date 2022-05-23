@@ -124,6 +124,7 @@ func (c *scheduleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	cronSchedule, errs := parseCronSchedule(schedule, c.logger)
 	if len(errs) > 0 {
+		// zhou: in this state, this schedule will never be handled again.
 		schedule.Status.Phase = velerov1.SchedulePhaseFailedValidation
 		schedule.Status.ValidationErrors = errs
 	} else {
@@ -171,6 +172,7 @@ func (c *scheduleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
+// zhou: parse cron schedule, handle illegle format.
 func parseCronSchedule(itm *velerov1.Schedule, logger logrus.FieldLogger) (cron.Schedule, []string) {
 	var validationErrors []string
 	var schedule cron.Schedule
@@ -196,14 +198,18 @@ func parseCronSchedule(itm *velerov1.Schedule, logger logrus.FieldLogger) (cron.
 			}
 		}()
 
+		// zhou: "res" type is cron.SpecSchedule, cron.Schedule is an interface.
 		if res, err := cron.ParseStandard(itm.Spec.Schedule); err != nil {
 			log.WithError(errors.WithStack(err)).WithField("schedule", itm.Spec.Schedule).Debug("Error parsing schedule")
 			validationErrors = append(validationErrors, fmt.Sprintf("invalid schedule: %v", err))
 		} else {
 			schedule = res
 		}
+
+		// zhou: defer func excuted here.
 	}()
 
+	// zhou: no matter panic happened in ParseStandard() or error returned.
 	if len(validationErrors) > 0 {
 		return nil, validationErrors
 	}
@@ -263,6 +269,9 @@ func (c *scheduleReconciler) submitBackup(ctx context.Context, schedule *velerov
 	}
 
 	original := schedule.DeepCopy()
+
+	// zhou: update LastBackup time
+
 	schedule.Status.LastBackup = &metav1.Time{Time: now}
 
 	if err := c.Patch(ctx, schedule, client.MergeFrom(original)); err != nil {
@@ -272,11 +281,16 @@ func (c *scheduleReconciler) submitBackup(ctx context.Context, schedule *velerov
 	return nil
 }
 
+// zhou: caculate against "LastBackup" to get time next to the "LastBackup".
+//       If it's too late to execute this function, the next time may be expired already.
+
 func getNextRunTime(schedule *velerov1.Schedule, cronSchedule cron.Schedule, asOf time.Time) (bool, time.Time) {
 	var lastBackupTime time.Time
 	if schedule.Status.LastBackup != nil {
+		// zhou: immediately backup in first time.
 		lastBackupTime = schedule.Status.LastBackup.Time
 	} else {
+		// zhou: set "lastBackupTime" as now, we can avoid immediately backup.
 		lastBackupTime = schedule.CreationTimestamp.Time
 	}
 	if schedule.Status.LastSkipped != nil && schedule.Status.LastSkipped.After(lastBackupTime) {
@@ -290,6 +304,8 @@ func getNextRunTime(schedule *velerov1.Schedule, cronSchedule cron.Schedule, asO
 
 func getBackup(item *velerov1.Schedule, timestamp time.Time) *velerov1.Backup {
 	name := item.TimestampedName(timestamp)
+
+	// zhou: good design pattern
 	return builder.
 		ForBackup(item.Namespace, name).
 		FromSchedule(item).

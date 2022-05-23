@@ -22,6 +22,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/client"
 )
 
+// zhou: TBD, "velero restic repo"
 func NewCommand(f client.Factory) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "repo",

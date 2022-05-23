@@ -23,6 +23,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/apiservice"}
+
 type APIServiceAction struct {
 	logger logrus.FieldLogger
 }

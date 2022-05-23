@@ -55,6 +55,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli/nodeagent"
 )
 
+// zhou: cli "velero"
 func NewCommand(name string) *cobra.Command {
 	// Load the config here so that we can extract features from it.
 	config, err := client.LoadConfig()
@@ -81,6 +82,8 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 		//  - a subcommand defines its own PersistentPreRun function
 		//  - the command is run without arguments or with --help and only prints the usage info
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// zhou: feature flags, should be run before subcommand in most of cases.
+			//       It could be enabled from config file or command line.
 			features.Enable(config.Features()...)
 			features.Enable(cmdFeatures...)
 
@@ -93,6 +96,9 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 		},
 	}
 
+	// zhou: convert k8s related configs into command line flags, including namespace/kubeconfig/kubecontext.
+	//       Otherwise, velero client command line will using "~/.kube/kubeconfig", velero server running in container will use in-cluster configuration.
+
 	f := client.NewFactory(name, config)
 	f.BindFlags(c.PersistentFlags())
 
@@ -102,6 +108,7 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 	// Color will be enabled or disabled for all subcommands
 	c.PersistentFlags().Var(&cmdColorzied, "colorized", "Show colored output in TTY. Overrides 'colorized' value from $HOME/.config/velero/config.json if present. Enabled by default")
 
+	// zhou: add subcommand
 	c.AddCommand(
 		backup.NewCommand(f),
 		schedule.NewCommand(f),
@@ -114,7 +121,9 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 		uninstall.NewCommand(f),
 		describe.NewCommand(f),
 		create.NewCommand(f),
+		// zhou: internal actions work as plugin
 		runplugin.NewCommand(f),
+		// zhou: external plugin
 		plugin.NewCommand(f),
 		delete.NewCommand(f),
 		cliclient.NewCommand(),

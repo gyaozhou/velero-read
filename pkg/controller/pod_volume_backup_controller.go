@@ -298,6 +298,9 @@ func (r *PodVolumeBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// zhou: in order to accelerate delta backup, we need to know previous backup.
+//       Due to each PodVolumeBackup already owns PVC UID label, we can search and get the snapshot id.
+
 // getParentSnapshot finds the most recent completed PodVolumeBackup for the
 // specified PVC and returns its snapshot ID. Any errors encountered are
 // logged but not returned since they do not prevent a backup from proceeding.

@@ -18,6 +18,8 @@ package controller
 
 import "context"
 
+// zhou: generic_controller.go "type genericController struct"
+
 // Interface represents a runnable component.
 type Interface interface {
 	// Run runs the component.

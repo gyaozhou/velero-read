@@ -94,6 +94,8 @@ func crdV1Beta1ReadinessFn(kbClient kbclient.Client, unstructuredCrds []*unstruc
 	}
 }
 
+// zhou: get CRD
+
 // crdV1ReadinessFn returns a function that can be used for polling to check
 // if the provided unstructured v1 CRDs are ready for use in the cluster.
 func crdV1ReadinessFn(kbClient kbclient.Client, unstructuredCrds []*unstructured.Unstructured) func(context.Context) (bool, error) {
@@ -191,6 +193,7 @@ func DeploymentIsReady(factory client.DynamicFactory, namespace string) (bool, e
 			return false, errors.Wrap(err, "error converting deployment from unstructured")
 		}
 
+		// zhou:
 		for _, cond := range deploy.Status.Conditions {
 			if isAvailable(cond) {
 				readyObservations++
@@ -247,6 +250,7 @@ func daemonSetIsReady(factory client.DynamicFactory, namespace string, name stri
 			return false, errors.Wrap(err, "error converting daemonset from unstructured")
 		}
 
+		// zhou: check whether all pod within daemonset is running
 		if daemonSet.Status.NumberAvailable == daemonSet.Status.DesiredNumberScheduled {
 			readyObservations++
 		}
@@ -277,6 +281,8 @@ func GroupResources(resources *unstructured.UnstructuredList) *ResourceGroup {
 
 	return rg
 }
+
+// zhou:
 
 // createResource attempts to create a resource in the cluster.
 // If the resource already exists in the cluster, it's merely logged.
@@ -316,6 +322,7 @@ func CreateClient(r *unstructured.Unstructured, factory client.DynamicFactory, w
 	}
 	log("attempting to create resource client")
 
+	// zhou:
 	gvk := schema.FromAPIVersionAndKind(r.GetAPIVersion(), r.GetKind())
 
 	apiResource := metav1.APIResource{
@@ -330,6 +337,8 @@ func CreateClient(r *unstructured.Unstructured, factory client.DynamicFactory, w
 
 	return c, nil
 }
+
+// zhou: MARKME, how to handle unstructured
 
 // Install creates resources on the Kubernetes cluster.
 // An unstructured list of resources is sent, one at a time, to the server. These are assumed to be in the preferred order already.

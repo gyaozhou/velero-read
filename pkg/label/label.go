@@ -28,6 +28,8 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 )
 
+// zhou: trim the origin if it is too long, and append checksum to avoid confliction.
+
 // GetValidName converts an input string to valid Kubernetes label string in accordance to rfc1035 DNS Label spec
 // (https://github.com/kubernetes/community/blob/master/contributors/design-proposals/architecture/identifiers.md)
 // Length of the label is adjusted basis the DNS1035LabelMaxLength (defined at k8s.io/apimachinery/pkg/util/validation)

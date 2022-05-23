@@ -22,6 +22,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/client"
 )
 
+// zhou: "velero restic"
 func NewCommand(f client.Factory) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "node-agent",
@@ -30,6 +31,9 @@ func NewCommand(f client.Factory) *cobra.Command {
 	}
 
 	c.AddCommand(
+
+		// zhou: TBD, "velero restic server"
+
 		NewServerCommand(f),
 	)
 

@@ -93,11 +93,15 @@ type Options struct {
 
 // BindFlags adds command line values to the options struct.
 func (o *Options) BindFlags(flags *pflag.FlagSet) {
+	// zhou: BSL and VSL (if used) provider name. e.g. aws for all aws compatible object storage.
 	flags.StringVar(&o.ProviderName, "provider", o.ProviderName, "Provider name for backup and volume storage")
 	flags.StringVar(&o.BucketName, "bucket", o.BucketName, "Name of the object storage bucket where backups should be stored")
+	// zhou: handle "secret-file"
 	flags.StringVar(&o.SecretFile, "secret-file", o.SecretFile, "File containing credentials for backup and volume provider. If not specified, --no-secret must be used for confirmation. Optional.")
 	flags.BoolVar(&o.NoSecret, "no-secret", o.NoSecret, "Flag indicating if a secret should be created. Must be used as confirmation if --secret-file is not provided. Optional.")
+
 	flags.BoolVar(&o.NoDefaultBackupLocation, "no-default-backup-location", o.NoDefaultBackupLocation, "Flag indicating if a default backup location should be created. Must be used as confirmation if --bucket or --provider are not provided. Optional.")
+
 	flags.StringVar(&o.Image, "image", o.Image, "Image to use for the Velero and node agent pods. Optional.")
 	flags.StringVar(&o.Prefix, "prefix", o.Prefix, "Prefix under which all Velero data should be stored within the bucket. Optional.")
 	flags.Var(&o.PodAnnotations, "pod-annotations", "Annotations to add to the Velero and node agent pods. Optional. Format is key1=value1,key2=value2")
@@ -118,17 +122,25 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVar(&o.UseVolumeSnapshots, "use-volume-snapshots", o.UseVolumeSnapshots, "Whether or not to create snapshot location automatically. Set to false if you do not plan to create volume snapshots via a storage provider.")
 	flags.BoolVar(&o.RestoreOnly, "restore-only", o.RestoreOnly, "Run the server in restore-only mode. Optional.")
 	flags.BoolVar(&o.DryRun, "dry-run", o.DryRun, "Generate resources, but don't send them to the cluster. Use with -o. Optional.")
+	// zhou: create restic daemonset only.
 	flags.BoolVar(&o.UseNodeAgent, "use-node-agent", o.UseNodeAgent, "Create Velero node-agent daemonset. Optional. Velero node-agent hosts and associates Velero modules that need to run in one or more Linux nodes.")
 	flags.BoolVar(&o.UseNodeAgentWindows, "use-node-agent-windows", o.UseNodeAgentWindows, "Create Velero node-agent-windows daemonset. Optional. Velero node-agent-windows hosts and associates Velero modules that need to run in one or more Windows nodes.")
 	flags.BoolVar(&o.PrivilegedNodeAgent, "privileged-node-agent", o.PrivilegedNodeAgent, "Use privileged mode for the node agent. Optional. Required to backup block devices.")
 	flags.BoolVar(&o.Wait, "wait", o.Wait, "Wait for Velero deployment to be ready. Optional.")
+
+	// zhou: frequency for "restic prune" to remove unneeded data from the repository.
 	flags.DurationVar(&o.DefaultRepoMaintenanceFrequency, "default-repo-maintain-frequency", o.DefaultRepoMaintenanceFrequency, "How often 'maintain' is run for backup repositories by default. Optional.")
 	flags.DurationVar(&o.GarbageCollectionFrequency, "garbage-collection-frequency", o.GarbageCollectionFrequency, "How often the garbage collection runs for expired backups.(default 1h)")
 	flags.DurationVar(&o.PodVolumeOperationTimeout, "pod-volume-operation-timeout", o.PodVolumeOperationTimeout, "How long to wait for pod volume operations to complete before timing out(default 4h). Optional.")
 	flags.Var(&o.Plugins, "plugins", "Plugin container images to install into the Velero Deployment")
 	flags.BoolVar(&o.CRDsOnly, "crds-only", o.CRDsOnly, "Only generate CustomResourceDefinition resources. Useful for updating CRDs for an existing Velero install.")
+	// zhou: CA for https used in object store.
 	flags.StringVar(&o.CACertFile, "cacert", o.CACertFile, "File containing a certificate bundle to use when verifying TLS connections to the object store. Optional.")
+
 	flags.StringVar(&o.Features, "features", o.Features, "Comma separated list of Velero feature flags to be set on the Velero deployment and the node-agent daemonset, if node-agent is enabled")
+
+	// zhou: by this flag to control whehter need imexplicit or explict specify volume.
+
 	flags.BoolVar(&o.DefaultVolumesToFsBackup, "default-volumes-to-fs-backup", o.DefaultVolumesToFsBackup, "Bool flag to configure Velero server to use pod volume file system backup by default for all volumes on all backups. Optional.")
 	flags.StringVar(&o.UploaderType, "uploader-type", o.UploaderType, fmt.Sprintf("The type of uploader to transfer the data of pod volumes, the supported values are '%s', '%s'", uploader.ResticType, uploader.KopiaType))
 	flags.BoolVar(&o.DefaultSnapshotMoveData, "default-snapshot-move-data", o.DefaultSnapshotMoveData, "Bool flag to configure Velero server to move data by default for all snapshots supporting data movement. Optional.")
@@ -194,6 +206,7 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 // NewInstallOptions instantiates a new, default InstallOptions struct.
 func NewInstallOptions() *Options {
 	return &Options{
+		// zhou: default namespace "velero"
 		Namespace:                 velerov1api.DefaultNamespace,
 		Image:                     velero.DefaultVeleroImage(),
 		BackupStorageConfig:       flag.NewMap(),
@@ -245,10 +258,14 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 			return nil, err
 		}
 	}
+	// zhou: parse to "corev1.ResourceRequirements" for velero pod
 	veleroPodResources, err := kubeutil.ParseResourceRequirements(o.VeleroPodCPURequest, o.VeleroPodMemRequest, o.VeleroPodCPULimit, o.VeleroPodMemLimit)
 	if err != nil {
 		return nil, err
 	}
+
+	// zhou: parse to "corev1.ResourceRequirements" for restic daemonset
+
 	nodeAgentPodResources, err := kubeutil.ParseResourceRequirements(o.NodeAgentPodCPURequest, o.NodeAgentPodMemRequest, o.NodeAgentPodCPULimit, o.NodeAgentPodMemLimit)
 	if err != nil {
 		return nil, err
@@ -294,6 +311,8 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 		ItemBlockWorkerCount:            o.ItemBlockWorkerCount,
 	}, nil
 }
+
+// zhou: "velero install"
 
 // NewCommand creates a cobra command.
 func NewCommand(f client.Factory) *cobra.Command {
@@ -349,6 +368,8 @@ This is useful as a starting point for more customized installations.
 	return c
 }
 
+// zhou: create objects to deploy velero server and restic server.
+
 // Run executes a command in the context of the provided arguments.
 func (o *Options) Run(c *cobra.Command, f client.Factory) error {
 	var resources *unstructured.UnstructuredList
@@ -359,7 +380,7 @@ func (o *Options) Run(c *cobra.Command, f client.Factory) error {
 		if err != nil {
 			return err
 		}
-
+		// zhou: objects to be created, including velero deployment, restic daemonset, ...
 		resources = install.AllResources(vo)
 	}
 
@@ -392,6 +413,8 @@ func (o *Options) Run(c *cobra.Command, f client.Factory) error {
 		if _, err = install.DeploymentIsReady(dynamicFactory, o.Namespace); err != nil {
 			return errors.Wrap(err, errorMsg)
 		}
+
+		// zhou: TBD, once specified "use-restic" in cli, then waiting for restic server ready.
 
 		if o.UseNodeAgent {
 			fmt.Println("Waiting for node-agent daemonset to be ready.")
@@ -449,6 +472,7 @@ func (o *Options) Validate(c *cobra.Command, args []string, f client.Factory) er
 		return errors.Errorf("Bucket names cannot begin with a dash. Bucket name was: %s", o.BucketName)
 	}
 
+	// zhou: no need create a default BSL
 	if o.NoDefaultBackupLocation {
 		if o.BucketName != "" {
 			return errors.New("Cannot use both --bucket and --no-default-backup-location at the same time")
@@ -471,6 +495,7 @@ func (o *Options) Validate(c *cobra.Command, args []string, f client.Factory) er
 		}
 	}
 
+	// zhou: use VSL
 	if o.UseVolumeSnapshots {
 		if o.ProviderName == "" {
 			return errors.New("--provider is required when --use-volume-snapshots is set to true")
