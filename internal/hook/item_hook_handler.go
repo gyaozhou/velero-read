@@ -70,6 +70,8 @@ const (
 	podRestoreHookInitContainerTimeoutAnnotationKey = "init.hook.restore.velero.io/timeout"
 )
 
+// zhou: handler to execute hook
+
 // ItemHookHandler invokes hooks for an item.
 type ItemHookHandler interface {
 	// HandleHooks invokes hooks for an item. If the item is a pod and the appropriate annotations exist
@@ -86,6 +88,8 @@ type ItemHookHandler interface {
 	) error
 }
 
+// zhou: used to handle init containers hook in restore.
+
 // ItemRestoreHookHandler invokes restore hooks for an item
 type ItemRestoreHookHandler interface {
 	HandleRestoreHooks(
@@ -98,6 +102,12 @@ type ItemRestoreHookHandler interface {
 
 // InitContainerRestoreHookHandler is the restore hook handler to add init containers to restored pods.
 type InitContainerRestoreHookHandler struct{}
+
+// zhou: right now, only be used for pod to set Init Container for hook.
+//       Add Init Container for the Pod to be restored. The Init Containers work as hook to execute
+//       customers defines behavior.
+//       The legacy method is user defines annotations in each pod to be restored.
+//       The new method is user defines in Restore spec.
 
 // HandleRestoreHooks runs the restore hooks for an item.
 // If the item is a pod, then hooks are chosen to be run as follows:
@@ -114,7 +124,7 @@ func (i *InitContainerRestoreHookHandler) HandleRestoreHooks(
 	if groupResource != kuberesource.Pods {
 		return nil, nil
 	}
-
+	// zhou: "Pod"
 	metadata, err := meta.Accessor(obj)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get a metadata accessor")
@@ -132,9 +142,11 @@ func (i *InitContainerRestoreHookHandler) HandleRestoreHooks(
 	// it before running any other init container.
 	if len(pod.Spec.InitContainers) > 0 && pod.Spec.InitContainers[0].Name == restorehelper.WaitInitContainer {
 		initContainers = append(initContainers, pod.Spec.InitContainers[0])
+		// zhou: temporarily remove "restic-wait" from 'pod.spec.InitContainers"
 		pod.Spec.InitContainers = pod.Spec.InitContainers[1:]
 	}
 
+	// zhou: if init container hook annotation defines, use it only. Otherwise, use restore.spec.
 	initContainerFromAnnotations := getInitContainerFromAnnotation(kube.NamespaceAndName(pod), metadata.GetAnnotations(), log)
 	if initContainerFromAnnotations != nil {
 		log.Infof("Handling InitRestoreHooks from pod annotations")
@@ -153,6 +165,7 @@ func (i *InitContainerRestoreHookHandler) HandleRestoreHooks(
 				namespace = n
 			}
 		}
+		// zhou: checking whether match the hook's selector.
 		for _, rh := range resourceRestoreHooks {
 			if !rh.Selector.applicableTo(groupResource, namespace, labels) {
 				continue
@@ -190,10 +203,14 @@ func (i *InitContainerRestoreHookHandler) HandleRestoreHooks(
 	return &unstructured.Unstructured{Object: podMap}, nil
 }
 
+// zhou: used in backup process
+
 // DefaultItemHookHandler is the default itemHookHandler.
 type DefaultItemHookHandler struct {
 	PodCommandExecutor podexec.PodCommandExecutor
 }
+
+// zhou: README,
 
 func (h *DefaultItemHookHandler) HandleHooks(
 	log logrus.FieldLogger,
@@ -215,6 +232,8 @@ func (h *DefaultItemHookHandler) HandleHooks(
 
 	namespace := metadata.GetNamespace()
 	name := metadata.GetName()
+
+	// zhou: legacy hooks are defined in annotation.
 
 	// If the pod has the hook specified via annotations, that takes priority.
 	hookFromAnnotations := getPodExecHookFromAnnotations(metadata.GetAnnotations(), phase, log)
@@ -250,6 +269,8 @@ func (h *DefaultItemHookHandler) HandleHooks(
 
 		return nil
 	}
+
+	// zhou: handle hooks defined in Backup.Spec
 
 	labels := labels.Set(metadata.GetLabels())
 	// Otherwise, check for hooks defined in the backup spec.
@@ -382,6 +403,8 @@ type ResourceHookSelector struct {
 	LabelSelector labels.Selector
 }
 
+// zhou: formalized backup hook from Backup.Spec
+
 // ResourceHook is a hook for a given resource.
 type ResourceHook struct {
 	Name     string
@@ -403,6 +426,8 @@ func (r ResourceHookSelector) applicableTo(groupResource schema.GroupResource, n
 	return true
 }
 
+// zhou: README,
+
 // ResourceRestoreHook is a restore hook for a given resource.
 type ResourceRestoreHook struct {
 	Name         string
@@ -410,7 +435,10 @@ type ResourceRestoreHook struct {
 	RestoreHooks []velerov1api.RestoreResourceHook
 }
 
+// zhou: I suppose it's a more specific method to set init container hook in annotations.
+
 func getInitContainerFromAnnotation(podName string, annotations map[string]string, log logrus.FieldLogger) *corev1api.Container {
+	// zhou: get image, coantiner name and command from annotation.
 	containerImage := annotations[podRestoreHookInitContainerImageAnnotationKey]
 	containerName := annotations[podRestoreHookInitContainerNameAnnotationKey]
 	command := annotations[podRestoreHookInitContainerCommandAnnotationKey]
@@ -421,6 +449,8 @@ func getInitContainerFromAnnotation(podName string, annotations map[string]strin
 	if command == "" {
 		log.Infof("RestoreHook init container for pod %s is using container's default entrypoint", podName, containerImage)
 	}
+
+	// zhou: generate a container name for it.
 	if containerName == "" {
 		uid, err := uuid.NewRandom()
 		uuidStr := "deadfeed"
@@ -451,6 +481,8 @@ func GetRestoreHooksFromSpec(hooksSpec *velerov1api.RestoreHooks) ([]ResourceRes
 	for _, rs := range hooksSpec.Resources {
 		rh := ResourceRestoreHook{
 			Name: rs.Name,
+			// zhou: due the restore init container only created for resource "Pod".
+			//       Only take care of "Namepace".
 			Selector: ResourceHookSelector{
 				Namespaces: collections.NewIncludesExcludes().Includes(rs.IncludedNamespaces...).Excludes(rs.ExcludedNamespaces...),
 				// these hooks ara applicable only to pods.
@@ -460,7 +492,7 @@ func GetRestoreHooksFromSpec(hooksSpec *velerov1api.RestoreHooks) ([]ResourceRes
 			// TODO does this work for ExecRestoreHook as well?
 			RestoreHooks: rs.PostHooks,
 		}
-
+		// zhou: handle "LabelSelector"
 		if rs.LabelSelector != nil {
 			ls, err := metav1.LabelSelectorAsSelector(rs.LabelSelector)
 			if err != nil {
@@ -468,11 +500,14 @@ func GetRestoreHooksFromSpec(hooksSpec *velerov1api.RestoreHooks) ([]ResourceRes
 			}
 			rh.Selector.LabelSelector = ls
 		}
+		// zhou:
 		restoreHooks = append(restoreHooks, rh)
 	}
 
 	return restoreHooks, nil
 }
+
+// zhou: README,
 
 // getPodExecRestoreHookFromAnnotations returns an ExecRestoreHook based on restore annotations, as
 // long as the 'command' annotation is present. If it is absent, this returns nil.
@@ -535,6 +570,8 @@ type PodExecRestoreHook struct {
 	Hook       velerov1api.ExecRestoreHook
 	executed   bool
 }
+
+// zhou: README,
 
 // GroupRestoreExecHooks returns a list of hooks to be executed in a pod grouped by
 // container name. If an exec hook is defined in annotation that is used, else applicable exec

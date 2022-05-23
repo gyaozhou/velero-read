@@ -34,7 +34,7 @@ func RunCommand(cmd *exec.Cmd) (string, string, error) {
 
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
-
+	// zhou: Run() == Start() and Wait()
 	runErr := cmd.Run()
 
 	var stdout, stderr string

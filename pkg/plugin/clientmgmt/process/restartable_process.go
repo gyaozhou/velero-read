@@ -68,6 +68,8 @@ type Reinitializer interface {
 	Reinitialize(dispensed any) error
 }
 
+// zhou:
+
 // newRestartableProcess creates a new restartableProcess for the given command and options.
 func newRestartableProcess(command string, logger logrus.FieldLogger, logLevel logrus.Level) (RestartableProcess, error) {
 	p := &restartableProcess{
@@ -100,6 +102,8 @@ func (p *restartableProcess) Reset() error {
 	return p.resetLH()
 }
 
+// zhou: README,
+
 // resetLH (re)launches the plugin process. It redispenses all previously dispensed plugins and reinitializes all the
 // registered reinitializers using the newly dispensed plugins.
 //
@@ -108,7 +112,7 @@ func (p *restartableProcess) resetLH() error {
 	if p.resetFailures > 10 {
 		return errors.Errorf("unable to restart plugin process: exceeded maximum number of reset failures")
 	}
-
+	// zhou:
 	process, err := newProcess(p.command, p.logger, p.logLevel)
 	if err != nil {
 		p.resetFailures++
@@ -166,6 +170,8 @@ func (p *restartableProcess) GetByKindAndName(key KindAndName) (any, error) {
 
 	return p.getByKindAndNameLH(key)
 }
+
+// zhou: README, how to mux the request to target plugin
 
 // getByKindAndNameLH returns the dispensed plugin for key. If the plugin hasn't been dispensed before, it dispenses a
 // new one.

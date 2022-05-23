@@ -92,7 +92,10 @@ type nodeAgentServerConfig struct {
 	nodeAgentConfig         string
 }
 
+// zhou: restic server
+
 func NewServerCommand(f client.Factory) *cobra.Command {
+	// zhou: controlled by "log-level"
 	logLevelFlag := logging.LogLevelFlag(logrus.InfoLevel)
 	formatFlag := logging.NewFormatFlag()
 	config := nodeAgentServerConfig{
@@ -121,6 +124,7 @@ func NewServerCommand(f client.Factory) *cobra.Command {
 		},
 	}
 
+	// zhou: enumeration
 	command.Flags().Var(logLevelFlag, "log-level", fmt.Sprintf("The level at which to log. Valid values are %s.", strings.Join(logLevelFlag.AllowedValues(), ", ")))
 	command.Flags().Var(formatFlag, "log-format", fmt.Sprintf("The format for log output. Valid values are %s.", strings.Join(formatFlag.AllowedValues(), ", ")))
 	command.Flags().DurationVar(&config.resourceTimeout, "resource-timeout", config.resourceTimeout, "How long to wait for resource processes which are not covered by other specific timeout parameters. Default is 10 minutes.")
@@ -130,6 +134,8 @@ func NewServerCommand(f client.Factory) *cobra.Command {
 
 	return command
 }
+
+// zhou: TBD, restic server
 
 type nodeAgentServer struct {
 	logger            logrus.FieldLogger
@@ -262,9 +268,12 @@ func newNodeAgentServer(logger logrus.FieldLogger, factory client.Factory, confi
 	return s, nil
 }
 
+// zhou: running restic server which owns controller for PodVolumeBackup and PodVolumeRestore
+
 func (s *nodeAgentServer) run() {
 	signals.CancelOnShutdown(s.cancelFunc, s.logger)
 
+	// zhou: restic server owns one http server.
 	go func() {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())
@@ -286,10 +295,12 @@ func (s *nodeAgentServer) run() {
 
 	s.logger.Info("Starting controllers")
 
+	// zhou:
 	credentialFileStore, err := credentials.NewNamespacedFileStore(
 		s.mgr.GetClient(),
+		// zhou: why need velero namespace?
 		s.namespace,
-		defaultCredentialsDirectory,
+		defaultCredentialsDirectory, // zhou: "/tmp/credentials"
 		filesystem.NewFileSystem(),
 	)
 	if err != nil {
@@ -303,6 +314,9 @@ func (s *nodeAgentServer) run() {
 
 	credentialGetter := &credentials.CredentialGetter{FromFile: credentialFileStore, FromSecret: credSecretStore}
 	repoEnsurer := repository.NewEnsurer(s.mgr.GetClient(), s.logger, s.config.resourceTimeout)
+
+	// zhou: restic server will run these controllers.
+
 	pvbReconciler := controller.NewPodVolumeBackupReconciler(s.mgr.GetClient(), s.dataPathMgr, repoEnsurer,
 		credentialGetter, s.nodeName, s.mgr.GetScheme(), s.metrics, s.logger)
 
@@ -382,7 +396,7 @@ func (s *nodeAgentServer) run() {
 	}()
 
 	s.logger.Info("Controllers starting...")
-
+	// zhou: controller runtime manager will setup cache also.
 	if err := s.mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		s.logger.Fatal("Problem starting manager", err)
 	}
@@ -411,6 +425,8 @@ func (s *nodeAgentServer) waitCacheForResume() error {
 	return nil
 }
 
+// zhou: checking the host path is what we expected directory structure.
+
 // validatePodVolumesHostPath validates that the pod volumes path contains a
 // directory for each Pod running on this node
 func (s *nodeAgentServer) validatePodVolumesHostPath(client kubernetes.Interface) error {
@@ -427,6 +443,7 @@ func (s *nodeAgentServer) validatePodVolumesHostPath(client kubernetes.Interface
 		}
 	}
 
+	// zhou: it doesn't depend on cache, fetch from api server directly.
 	pods, err := client.CoreV1().Pods("").List(s.ctx, metav1.ListOptions{FieldSelector: fmt.Sprintf("spec.nodeName=%s,status.phase=Running", s.nodeName)})
 	if err != nil {
 		return errors.WithStack(err)

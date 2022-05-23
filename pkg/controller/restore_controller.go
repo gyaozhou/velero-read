@@ -61,6 +61,8 @@ import (
 	pkgrestoreUtil "github.com/vmware-tanzu/velero/pkg/util/velero/restore"
 )
 
+// zhou: resources can't be restored.
+
 // nonRestorableResources is an exclusion list  for the restoration process. Any resources
 // included here are explicitly excluded from the restoration process.
 var nonRestorableResources = []string{
@@ -107,8 +109,8 @@ type restoreReconciler struct {
 	defaultItemOperationTimeout time.Duration
 	disableInformerCache        bool
 
-	newPluginManager  func(logger logrus.FieldLogger) clientmgmt.Manager
-	backupStoreGetter persistence.ObjectBackupStoreGetter
+	newPluginManager  func(logger logrus.FieldLogger) clientmgmt.Manager // zhou: anonymous function to create plugin manager
+	backupStoreGetter persistence.ObjectBackupStoreGetter                // zhou: handler to get object store
 	globalCrClient    client.Client
 	resourceTimeout   time.Duration
 }
@@ -259,12 +261,17 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			req.NamespacedName.String(), restore.Status.Phase, err.Error())
 		return ctrl.Result{}, errors.Wrapf(err, "error updating Restore phase to %s", restore.Status.Phase)
 	}
+
+	// zhou: after updated Restore CR phase success, can't re-enqueue since NOT Phase new any more.
+
 	// store ref to just-updated item for creating patch
 	original = restore.DeepCopy()
 
 	if restore.Status.Phase == api.RestorePhaseFailedValidation {
 		return ctrl.Result{}, nil
 	}
+
+	// zhou: core function to perform restore actions.
 
 	if err := r.runValidatedRestore(restore, info, resourceModifiers); err != nil {
 		log.WithError(err).Debug("Restore failed")
@@ -302,9 +309,13 @@ func (r *restoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// zhou: validate and complete Restore CR, then get "backupInfo struct"
+
 func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInfo, *resourcemodifiers.ResourceModifiers) {
 	// add non-restorable resources to restore's excluded resources
 	excludedResources := sets.NewString(restore.Spec.ExcludedResources...)
+
+	// zhou: expand restore.spec.excludedresources with internal excluded resource.
 	for _, nonrestorable := range nonRestorableResources {
 		if !excludedResources.Has(nonrestorable) {
 			restore.Spec.ExcludedResources = append(restore.Spec.ExcludedResources, nonrestorable)
@@ -318,6 +329,8 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("%v are non-restorable resources", nonRestorableResource))
 		}
 	}
+
+	// zhou: make sure the exclude and include list are not conflict.
 
 	// validate included/excluded resources
 	for _, err := range collections.ValidateIncludesExcludes(restore.Spec.IncludedResources, restore.Spec.ExcludedResources) {
@@ -370,6 +383,8 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 			api.ScheduleNameLabel: restore.Spec.ScheduleName,
 		}))
 
+		// zhou: list Backup CR with matched label
+
 		backupList := &api.BackupList{}
 		if err := r.kbClient.List(context.Background(), backupList, &client.ListOptions{LabelSelector: selector}); err != nil {
 			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, "Unable to list backups for schedule")
@@ -380,12 +395,15 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 		}
 
 		if backup := mostRecentCompletedBackup(backupList.Items); backup.Name != "" {
+			// zhou: fill the BackupName
 			restore.Spec.BackupName = backup.Name
 		} else {
 			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, "No completed backups found for schedule")
 			return backupInfo{}, nil
 		}
 	}
+
+	// zhou: validate the Backup CR, and download backup files from object storage.
 
 	info, err := r.fetchBackupInfo(restore.Spec.BackupName)
 	if err != nil {
@@ -459,6 +477,8 @@ func mostRecentCompletedBackup(backups []api.Backup) api.Backup {
 	return api.Backup{}
 }
 
+// zhou: "pluginManager" is used to get Object Store
+
 // fetchBackupInfo checks the backup lister for a backup that matches the given name. If it doesn't
 // find it, it returns an error.
 func (r *restoreReconciler) fetchBackupInfo(backupName string) (backupInfo, error) {
@@ -471,6 +491,8 @@ func fetchBackupInfoInternal(kbClient client.Client, namespace, backupName strin
 	if err != nil {
 		return backupInfo{}, errors.Wrap(err, fmt.Sprintf("can't find backup %s/%s", namespace, backupName))
 	}
+
+	// zhou: without BSL, we don't know where to download.
 
 	location := &api.BackupStorageLocation{}
 	if err := kbClient.Get(context.Background(), client.ObjectKey{
@@ -486,6 +508,10 @@ func fetchBackupInfoInternal(kbClient client.Client, namespace, backupName strin
 	}, nil
 }
 
+// zhou: README, core function to perform restore actions.
+//       And upload: [bucket]:[prefix]/restores/[restore name]/restore-[restore name]-logs.gz
+//                   [bucket]:[prefix]/restores/[restore name]/restore-[restore name]-results.gz
+
 // runValidatedRestore takes a validated restore API object and executes the restore process.
 // The log and results files are uploaded to backup storage. Any error returned from this function
 // means that the restore failed. This function updates the restore API object with warning and error
@@ -499,6 +525,8 @@ func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backu
 	}
 	defer restoreLog.Dispose(r.logger)
 
+	// zhou: using "restoreLog" which will be uploaded later.
+
 	pluginManager := r.newPluginManager(restoreLog)
 	defer pluginManager.CleanupClients()
 
@@ -507,11 +535,15 @@ func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backu
 		return err
 	}
 
+	// zhou: get all handlers of PluginKindRestoreItemAction plugins.
+
 	actions, err := pluginManager.GetRestoreItemActionsV2()
 	if err != nil {
 		return errors.Wrap(err, "error getting restore item actions")
 	}
 	actionsResolver := framework.NewRestoreItemActionResolverV2(actions)
+
+	// zhou: get file "[backup name].tar.gz" from object store and write to "backupFile"
 
 	backupFile, err := downloadToTempFile(restore.Spec.BackupName, backupStore, restoreLog)
 	if err != nil {
@@ -531,6 +563,8 @@ func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backu
 		restoreLog.Errorf("Fail to list PodVolumeBackup :%s", err.Error())
 		return errors.WithStack(err)
 	}
+
+	// zhou: decode file "[backup name]-volumesnapshots.json.gz", used for Cloud VolumeSnapshot.
 
 	volumeSnapshots, err := backupStore.GetBackupVolumeSnapshots(restore.Spec.BackupName)
 	if err != nil {
@@ -565,8 +599,8 @@ func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backu
 		Restore:                       restore,
 		Backup:                        info.backup,
 		PodVolumeBackups:              podVolumeBackups,
-		VolumeSnapshots:               volumeSnapshots,
-		BackupReader:                  backupFile,
+		VolumeSnapshots:               volumeSnapshots, // zhou: cloud VolumeSnapshot
+		BackupReader:                  backupFile,      // zhou: backed up metadata
 		ResourceModifiers:             resourceModifiers,
 		DisableInformerCache:          r.disableInformerCache,
 		CSIVolumeSnapshots:            csiVolumeSnapshots,
@@ -574,6 +608,9 @@ func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backu
 		RestoreVolumeInfoTracker:      volume.NewRestoreVolInfoTracker(restore, restoreLog, r.globalCrClient),
 		ResourceDeletionStatusTracker: kubeutil.NewResourceDeletionStatusTracker(),
 	}
+
+	// zhou: perform restore, takes some time.
+
 	restoreWarnings, restoreErrors := r.restorer.RestoreWithResolvers(restoreReq, actionsResolver, pluginManager)
 
 	// Iterate over restore item operations and update progress.
@@ -617,6 +654,8 @@ func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backu
 	restoreLog.Info("restore completed")
 
 	restoreLog.DoneForPersist(r.logger)
+
+	// zhou: due to last step need some time to execute, we have to handle credential changing.
 
 	// re-instantiate the backup store because credentials could have changed since the original
 	// instantiation, if this was a long-running restore
@@ -820,7 +859,10 @@ func putRestoreVolumeInfoList(restore *api.Restore, volInfoList []*volume.Restor
 	return store.PutRestoreVolumeInfo(restore.Name, buf)
 }
 
+// zhou: get backup file from Object Store, and write a to a temp file.
+
 func downloadToTempFile(backupName string, backupStore persistence.BackupStore, logger logrus.FieldLogger) (*os.File, error) {
+	// zhou: just get a handle to read/close file "[backup name].tar.gz".
 	readCloser, err := backupStore.GetBackupContents(backupName)
 	if err != nil {
 		return nil, err
@@ -831,7 +873,7 @@ func downloadToTempFile(backupName string, backupStore persistence.BackupStore, 
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating Backup temp file")
 	}
-
+	// zhou: read from Object Store and write to a temp file.
 	n, err := io.Copy(file, readCloser)
 	if err != nil {
 		// Temporary file has been created if we go here. And some problems occurs such as network interruption and
@@ -847,6 +889,7 @@ func downloadToTempFile(backupName string, backupStore persistence.BackupStore, 
 		"bytes":    n,
 	}).Debug("Copied Backup to file")
 
+	// zhou: reset the offset of file
 	if _, err := file.Seek(0, 0); err != nil {
 		closeAndRemoveFile(file, logger)
 		return nil, errors.Wrap(err, "error resetting Backup file offset")

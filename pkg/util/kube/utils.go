@@ -64,6 +64,8 @@ func NamespaceAndName(objMeta metav1.Object) string {
 	return fmt.Sprintf("%s/%s", objMeta.GetNamespace(), objMeta.GetName())
 }
 
+// zhou: README, block to create Namespace.
+
 // EnsureNamespaceExistsAndIsReady attempts to create the provided Kubernetes namespace.
 // It returns three values:
 //   - a bool indicating whether or not the namespace is ready,
@@ -144,6 +146,8 @@ func EnsureNamespaceExistsAndIsReady(namespace *corev1api.Namespace, client core
 	// The namespace created successfully
 	return true, nsCreated, nil
 }
+
+// zhou: return "volume.Name" or "volume.Name" + "/mount"
 
 // GetVolumeDirectory gets the name of the directory on the host, under /var/lib/kubelet/pods/<podUID>/volumes/,
 // where the specified volume lives.
@@ -231,6 +235,8 @@ func GetPodPVCVolume(ctx context.Context, log logrus.FieldLogger, pod *corev1api
 
 	return pvc, pv, volume, nil
 }
+
+// zhou: whether the PV is provisioned by CSI, orelse is created by Administrator.
 
 // isProvisionedByCSI function checks whether this is a CSI PV by annotation.
 // Either "pv.kubernetes.io/provisioned-by" or "pv.kubernetes.io/migrated-to" indicates

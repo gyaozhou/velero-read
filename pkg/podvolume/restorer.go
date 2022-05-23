@@ -63,11 +63,18 @@ type restorer struct {
 	kubeClient  kubernetes.Interface
 	crClient    ctrlclient.Client
 
+	// zhou: used to notify the completion of PodVolumeRestore to restore controller.
+	//       channel map key is "resultsKey(pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name)"
+
 	resultsLock    sync.Mutex
 	results        map[string]chan *velerov1api.PodVolumeRestore
 	nodeAgentCheck chan error
 	log            logrus.FieldLogger
 }
+
+// zhou: AddEventHandler() for PodVolumeRestore Informer. The event handler is used to watch
+//       PodVolumeRestore CR phase changed. Restore controller is waiting for volumes restored
+//       completed.
 
 func newRestorer(
 	ctx context.Context,
@@ -79,6 +86,7 @@ func newRestorer(
 	restore *velerov1api.Restore,
 	log logrus.FieldLogger,
 ) *restorer {
+	// zhou: used to receive the notification.
 	r := &restorer{
 		ctx:         ctx,
 		repoLocker:  repoLocker,
@@ -92,6 +100,7 @@ func newRestorer(
 
 	_, _ = pvrInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
+			// zhou: handle "UpdateFunc" only, will do nothing to "DeleteFunc".
 			UpdateFunc: func(_, obj any) {
 				pvr := obj.(*velerov1api.PodVolumeRestore)
 				if pvr.GetLabels()[velerov1api.RestoreUIDLabel] != string(restore.UID) {
@@ -136,6 +145,10 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 		return []error{err}
 	}
 
+	// zhou: restore from Restic repo
+	//       Read lock to protect "restic -r xxx restore" in Restic DaemonSet by creating and waiting
+	//       the PodVolumeRestore CRs' completion.
+
 	// get a single non-exclusive lock since we'll wait for all individual
 	// restores to be complete before releasing it.
 	r.repoLocker.Lock(repo.Name)
@@ -178,6 +191,8 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 				}
 			}
 		}
+
+		// zhou: init and create PodVolumeRestore CR
 
 		volumeRestore := newPodVolumeRestore(data.Restore, data.Pod, data.BackupLocation, volume, backupInfo.snapshotID, repoIdentifier, backupInfo.uploaderType, data.SourceNamespace, pvc)
 		if err := veleroclient.CreateRetryGenerateName(r.crClient, r.ctx, volumeRestore); err != nil {
@@ -227,6 +242,8 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 		}
 	}()
 
+	// zhou: wait for PodVolumeRestore CR completion
+
 ForEachVolume:
 	for i := 0; i < numRestores; i++ {
 		select {
@@ -255,6 +272,8 @@ ForEachVolume:
 
 	return errs
 }
+
+// zhou: init PodVolumeRestore object
 
 func newPodVolumeRestore(restore *velerov1api.Restore, pod *corev1api.Pod, backupLocation, volume, snapshot, repoIdentifier, uploaderType, sourceNamespace string, pvc *corev1api.PersistentVolumeClaim) *velerov1api.PodVolumeRestore {
 	pvr := &velerov1api.PodVolumeRestore{

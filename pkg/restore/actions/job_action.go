@@ -31,6 +31,8 @@ const (
 	controllerUIDLabel       = "batch.kubernetes.io/controller-uid" // >=1.27 https://github.com/kubernetes/kubernetes/pull/114930#issuecomment-1384667494
 )
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/job"}
+
 type JobAction struct {
 	logger logrus.FieldLogger
 }

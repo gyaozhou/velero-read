@@ -80,6 +80,7 @@ if [[ "${GOOS}" = "windows" ]]; then
   OUTPUT="${OUTPUT}.exe"
 fi
 
+# zhou: 
 go build \
     -o ${OUTPUT} \
     -gcflags "${GCFLAGS}" \

@@ -31,6 +31,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util"
 )
 
+// zhou: could only encode Velero Scheme registered objects.
+
 // Encode converts the provided object to the specified format
 // and returns a byte slice of the encoded data.
 func Encode(obj runtime.Object, format string) ([]byte, error) {

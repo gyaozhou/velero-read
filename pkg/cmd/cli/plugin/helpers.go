@@ -28,6 +28,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/install"
 )
 
+// zhou: check label and includes container "velero"
+
 // veleroDeployment returns a Velero deployment object, selected with label and container name,
 // refer to https://github.com/vmware-tanzu/velero/issues/3961 for more information
 func veleroDeployment(ctx context.Context, kubeClient kubernetes.Interface, namespace string) (*appsv1api.Deployment, error) {

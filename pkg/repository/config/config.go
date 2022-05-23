@@ -30,6 +30,8 @@ import (
 type BackendType string
 
 const (
+	// zhou: how to handle other backends ?
+
 	AWSBackend   BackendType = "velero.io/aws"
 	AzureBackend BackendType = "velero.io/azure"
 	GCPBackend   BackendType = "velero.io/gcp"
@@ -43,6 +45,9 @@ const (
 // this func is assigned to a package-level variable so it can be
 // replaced when unit-testing
 var getAWSBucketRegion = GetAWSBucketRegion
+
+// zhou: get the object storage prefix for restic.
+//       e.g. "s3-[region name].amazonaws.com:[bucket name]/[bsl.spec.objectStorage.prefix]/restic"
 
 // getRepoPrefix returns the prefix of the value of the --repo flag for
 // restic commands, i.e. everything except the "/<repo-name>".
@@ -111,6 +116,9 @@ func GetBackendType(provider string, config map[string]string) BackendType {
 func IsBackendTypeValid(backendType BackendType) bool {
 	return (backendType == AWSBackend || backendType == AzureBackend || backendType == GCPBackend || backendType == FSBackend)
 }
+
+// zhou: get repo name used as "--repo" flag of cli "restic".
+//       e.g. "s3-[region name].amazonaws.com:[bsl.spec.objectStorage.bucket]/[bsl.spec.objectStorage.prefix]/restic/[namespace]"
 
 // GetRepoIdentifier returns the string to be used as the value of the --repo flag in
 // restic commands for the given repository.

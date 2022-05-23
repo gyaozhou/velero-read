@@ -20,8 +20,13 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: Restion Item Action plugin interface
+//       implemented by "restartableRestoreItemAction struct",
+
 // RestoreItemAction is an actor that performs an operation on an individual item being restored.
 type RestoreItemAction interface {
+	// zhou: identify which resources need to be handled in "Execute()"
+
 	// AppliesTo returns information about which resources this action should be invoked for.
 	// A RestoreItemAction's Execute function will only be invoked on items that match the returned
 	// selector. A zero-valued ResourceSelector matches all resources.

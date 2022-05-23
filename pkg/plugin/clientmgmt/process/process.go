@@ -24,7 +24,11 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
 )
 
+// zhou: create a subprocess to execute "command", get the interface "Process" for interaction.
+
 type Factory interface {
+	// zhou: the reason why "logLevel" has to be passed explicit again is,  it will be used as subprocess
+	//       cli flags.
 	newProcess(command string, logger logrus.FieldLogger, logLevel logrus.Level) (Process, error)
 }
 
@@ -39,7 +43,9 @@ func (pf *processFactory) newProcess(command string, logger logrus.FieldLogger, 
 	return newProcess(command, logger, logLevel)
 }
 
+// zhou: get corresponding RPC service client by the "key", then user can operate via it.
 type Process interface {
+	// zhou: specify the RPC service name, return error if not implemented by subprocess.
 	dispense(key KindAndName) (any, error)
 	exited() bool
 	kill()
@@ -50,11 +56,18 @@ type process struct {
 	protocolClient plugin.ClientProtocol
 }
 
+// zhou: create subprocess to execute plugin binary.
 func newProcess(command string, logger logrus.FieldLogger, logLevel logrus.Level) (Process, error) {
+	// zhou: set command with flags to be executed.
 	builder := newClientBuilder(command, logger.WithField("cmd", command), logLevel)
+
+	// zhou: init go-plugin client
 
 	// This creates a new go-plugin Client that has its own unique exec.Cmd for launching the plugin process.
 	client := builder.client()
+
+	// zhou: go-plugin client.go/Client(), create sub-process !!!
+	//       Then, communication with process via this client.
 
 	// This launches the plugin process.
 	protocolClient, err := client.Client()
@@ -97,6 +110,9 @@ func removeFeaturesFlag(args []string) []string {
 	return commandArgs
 }
 
+// zhou: get the rpc service client via rpc service name (e.g. framework.PluginKindPluginLister) to
+//       this plugin process.
+
 func (r *process) dispense(key KindAndName) (any, error) {
 	// This calls GRPCClient(clientConn) on the plugin instance registered for key.name.
 	dispensed, err := r.protocolClient.Dispense(key.Kind.String())
@@ -109,6 +125,9 @@ func (r *process) dispense(key KindAndName) (any, error) {
 		if key.Name == "" {
 			return nil, errors.Errorf("%s plugin requested but name is missing", key.Kind.String())
 		}
+
+		// zhou: get the specific vendor plugin's corresponding client.
+
 		// Get the instance that implements our plugin interface (e.g. ObjectStore) that is a gRPC-based
 		// client
 		dispensed = clientDispenser.ClientFor(key.Name)

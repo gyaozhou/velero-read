@@ -66,13 +66,13 @@ type backupReconciler struct {
 	ctx                         context.Context
 	logger                      logrus.FieldLogger
 	discoveryHelper             discovery.Helper
-	backupper                   pkgbackup.Backupper
+	backupper                   pkgbackup.Backupper // zhou: core, "kubernetesBackupper{}"
 	kbClient                    kbclient.Client
 	clock                       clock.WithTickerAndDelayedExecution
 	backupLogLevel              logrus.Level
-	newPluginManager            func(logrus.FieldLogger) clientmgmt.Manager
-	backupTracker               BackupTracker
-	defaultBackupLocation       string
+	newPluginManager            func(logrus.FieldLogger) clientmgmt.Manager // zhou: anonymous function to create plugin manager
+	backupTracker               BackupTracker                               // zhou: track all ongoing Backup
+	defaultBackupLocation       string                                      // zhou: default BSL
 	defaultVolumesToFsBackup    bool
 	defaultBackupTTL            time.Duration
 	defaultCSISnapshotTimeout   time.Duration
@@ -80,7 +80,7 @@ type backupReconciler struct {
 	defaultItemOperationTimeout time.Duration
 	defaultSnapshotLocations    map[string]string
 	metrics                     *metrics.ServerMetrics
-	backupStoreGetter           persistence.ObjectBackupStoreGetter
+	backupStoreGetter           persistence.ObjectBackupStoreGetter // zhou: handler to get object store
 	formatFlag                  logging.Format
 	credentialFileStore         credentials.FileStore
 	maxConcurrentK8SConnections int
@@ -181,6 +181,10 @@ func (b *backupReconciler) updateTotalBackupMetric() {
 	}()
 }
 
+// zhou: go through all Backup, use its owner Schedule CR name as key, the completion time as value.
+//       Get a map of {schedule, most recently completion timestamp}.
+//       For ondemand backup, the key is empty, and no use.
+
 // getLastSuccessBySchedule finds the most recent completed backup for each schedule
 // and returns a map of schedule name -> completion time of the most recent completed
 // backup. This map includes an entry for ad-hoc/non-scheduled backups, where the key
@@ -225,6 +229,10 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
+	// zhou: multi-thread controller share one event queue, as controller-runtime.
+	//       But there is not guarantee that one object only be handled by one thread ???
+	//       Should have, since the logic is implemented by workqueue itself.
+
 	// Double-check we have the correct phase. In the unlikely event that multiple controller
 	// instances are running, it's possible for controller A to succeed in changing the phase to
 	// InProgress, while controller B's attempt to patch the phase fails. When controller B
@@ -261,6 +269,9 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, errors.Wrapf(err, "error updating Backup status to %s", request.Status.Phase)
 	}
 
+	// zhou: refer to anonymous field "velerov1api.Backup" within "Request"
+	//       on-demand backup will not set it.
+
 	backupScheduleName := request.GetLabels()[velerov1api.ScheduleNameLabel]
 
 	if request.Status.Phase == velerov1api.BackupPhaseFailedValidation {
@@ -285,6 +296,8 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	log.Debug("Running backup")
 
 	b.metrics.RegisterBackupAttempt(backupScheduleName)
+
+	// zhou: after preparation, perform backup with help of "backupper"
 
 	// execution & upload of backup
 	if err := b.runBackup(request); err != nil {
@@ -327,8 +340,12 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return ctrl.Result{}, nil
 }
 
+// zhou: validate and pack Backup CR related resource into pkgbackup.Request.
+//       Fill default value to blank fields.
+
 func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logger logrus.FieldLogger) *pkgbackup.Request {
 	request := &pkgbackup.Request{
+		// zhou: unlike controller-runtime, there is no deepcopy performed before Reconcile()
 		Backup:           backup.DeepCopy(), // don't modify items in the cache
 		SkippedPVTracker: pkgbackup.NewSkipPVTracker(),
 		BackedUpItems:    pkgbackup.NewBackedUpItemsMap(),
@@ -343,6 +360,7 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 	request.Status.FormatVersion = pkgbackup.BackupFormatVersion
 
 	if request.Spec.TTL.Duration == 0 {
+		// zhou: 30 * 24 * time.Hour, defined in server.go
 		// set default backup TTL
 		request.Spec.TTL.Duration = b.defaultBackupTTL
 	}
@@ -356,6 +374,8 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 		// set default item operation timeout
 		request.Spec.ItemOperationTimeout.Duration = b.defaultItemOperationTimeout
 	}
+
+	// zhou:
 
 	// calculate expiration
 	request.Status.Expiration = &metav1.Time{Time: b.clock.Now().Add(request.Spec.TTL.Duration)}
@@ -375,6 +395,8 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 		request.Spec.SnapshotMoveData = &b.defaultSnapshotMoveData
 	}
 
+	// zhou: server spedified BackupStorageLocation, not specified by Backup CR.
+
 	// find which storage location to use
 	var serverSpecified bool
 	if request.Spec.StorageLocation == "" {
@@ -385,6 +407,7 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 		locationList, err := storage.ListBackupStorageLocations(context.Background(), b.kbClient, request.Namespace)
 		if err == nil {
 			for _, location := range locationList.Items {
+				// zhou: there will be problem when multiply BSL were set as default.
 				if location.Spec.Default {
 					request.Spec.StorageLocation = location.Name
 					break
@@ -411,8 +434,10 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 			request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("error getting backup storage location: %v", err))
 		}
 	} else {
+		// zhou: get a valid BSL CR
 		request.StorageLocation = storageLocation
 
+		// zhou: the BSL is read only.
 		if request.StorageLocation.Spec.AccessMode == velerov1api.BackupStorageLocationAccessModeReadOnly {
 			request.Status.ValidationErrors = append(request.Status.ValidationErrors,
 				fmt.Sprintf("backup can't be created because backup storage location %s is currently in read-only mode", request.StorageLocation.Name))
@@ -423,6 +448,7 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 	if request.Labels == nil {
 		request.Labels = make(map[string]string)
 	}
+	// zhou: ??? who will use it.
 	request.Labels[velerov1api.StorageLocationLabel] = label.GetValidName(request.Spec.StorageLocation)
 
 	// validate and get the backup's VolumeSnapshotLocations, and store the
@@ -500,6 +526,9 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 	return request
 }
 
+// zhou: "backup.Spec.VolumeSnapshotLocations" is used to specify when multiply VSL related to one provider.
+//       With this field, user could override default VSL of a provider, or specify one if no default.
+
 // validateAndGetSnapshotLocations gets a collection of VolumeSnapshotLocation objects that
 // this backup will use (returned as a map of provider name -> VSL), and ensures:
 //   - each location name in .spec.volumeSnapshotLocations exists as a location
@@ -510,6 +539,7 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 //
 // if backup has snapshotVolume disabled then it returns empty VSL
 func (b *backupReconciler) validateAndGetSnapshotLocations(backup *velerov1api.Backup) (map[string]*velerov1api.VolumeSnapshotLocation, []string) {
+	// zhou: empty slice
 	errors := []string{}
 	providerLocations := make(map[string]*velerov1api.VolumeSnapshotLocation)
 
@@ -538,6 +568,7 @@ func (b *backupReconciler) validateAndGetSnapshotLocations(backup *velerov1api.B
 		}
 	}
 
+	// zhou: why not stop as soon as possible?
 	if len(errors) > 0 {
 		return nil, errors
 	}
@@ -554,6 +585,9 @@ func (b *backupReconciler) validateAndGetSnapshotLocations(backup *velerov1api.B
 		loc := volumeSnapshotLocations.Items[i]
 		allProviderLocations[loc.Spec.Provider] = append(allProviderLocations[loc.Spec.Provider], &loc)
 	}
+
+	// zhou: make sure the "VolumeSnapshotLocations" in backup CR should contain all providers existing in
+	//       VSL list. If not, checkout whether this provider has defined a default VSL.
 
 	// go through each provider and make sure we have/can get a VSL
 	// for it
@@ -576,10 +610,13 @@ func (b *backupReconciler) validateAndGetSnapshotLocations(backup *velerov1api.B
 				errors = append(errors, fmt.Sprintf("error getting volume snapshot location named %s: %v", defaultLocation, err))
 				continue
 			}
-
+			// zhou: if not specified in "backup.Spec.VolumeSnapshotLocations", check whether
+			//       default VSL defined for this provider.
 			providerLocations[provider] = location
 			continue
 		}
+
+		// zhou: no default, and exactly one, using it directly.
 
 		// exactly one location for the provider: use it
 		providerLocations[provider] = locations[0]
@@ -605,12 +642,17 @@ func (b *backupReconciler) validateAndGetSnapshotLocations(backup *velerov1api.B
 	return providerLocations, nil
 }
 
+// zhou: perform backup with help of "backupper" !!!
+
 // runBackup runs and uploads a validated backup. Any error returned from this function
 // causes the backup to be Failed; if no error is returned, the backup's status's Errors
 // field is checked to see if the backup was a partial failure.
 
 func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 	b.logger.WithField(constant.ControllerBackup, kubeutil.NamespaceAndName(backup)).Info("Setting up backup log")
+
+	// zhou: logrus hook to count each level.
+	// zhou: "backupLog" will be print to console only.
 
 	// Log the backup to both a backup log file and to stdout. This will help see what happened if the upload of the
 	// backup log failed for whatever reason.
@@ -622,15 +664,23 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 	defer backupLog.Dispose(b.logger.WithField(constant.ControllerBackup, kubeutil.NamespaceAndName(backup)))
 
 	backupLog.Info("Setting up backup temp file")
+	// zhou: file to be persistent objects json.
 	backupFile, err := os.CreateTemp("", "")
 	if err != nil {
 		return errors.Wrap(err, "error creating temp file for backup")
 	}
 	defer closeAndRemoveFile(backupFile, backupLog)
 
+	// zhou: in each reconcile(), create a plugin manager which is used to invoke plugins
+	//       functions.
+	//       "newPluginManager" is a wrapper function of "clientmgmt.NewManager()".
 	backupLog.Info("Setting up plugin manager")
 	pluginManager := b.newPluginManager(backupLog)
+	// zhou: kill all plugin process before leave this reconcile()
 	defer pluginManager.CleanupClients()
+
+	// zhou: get "PluginKindBackupItemAction" and "PluginKindItemSnapshotter" plugins' handler/actions.
+	//       Action knows how to talk with plugin process.
 
 	backupLog.Info("Getting backup item actions")
 	actions, err := pluginManager.GetBackupItemActionsV2()
@@ -642,14 +692,24 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 	if err != nil {
 		return err
 	}
+
+	// zhou: FIXME, it's better to move backupStore, BackupExists(), before processing plugin actions/resovler.
+
+	// zhou: Get "BackupStore", which is the handler to operate object store.
+	//       With BSL name used in Backup CR and plugin manager "ObjectStoreGetter", find the plugin
+	//       which implements this BSL object store. And using credential, varify its accesibility.
+
 	backupLog.Info("Setting up backup store to check for backup existence")
 	backupStore, err := b.backupStoreGetter.Get(backup.StorageLocation, pluginManager, backupLog)
 	if err != nil {
 		return err
 	}
 
+	// zhou: checks file "velero-backup.json" in object storage, which containes Backup object.
+	//       It's important, since the Backup CR may just synced from object storage.
 	exists, err := backupStore.BackupExists(backup.StorageLocation.Spec.StorageType.ObjectStorage.Bucket, backup.Name)
 	if exists || err != nil {
+		// zhou: sync controller will overwrite it.
 		backup.Status.Phase = velerov1api.BackupPhaseFailed
 		backup.Status.CompletionTimestamp = &metav1.Time{Time: b.clock.Now()}
 		if err != nil {
@@ -658,9 +718,13 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 		return errors.Errorf("backup already exists in object storage")
 	}
 
+	// zhou: create "PluginKindBackupItemAction" and "PluginKindItemSnapshotter" plugins' resolver.
+	//       So user could invoke "AppliesTo()" to each registered plugin, by this resolver's ResolveActions().
+
 	backupItemActionsResolver := framework.NewBackupItemActionResolverV2(actions)
 	itemBlockActionResolver := framework.NewItemBlockActionResolver(ibActions)
 
+	// zhou: core step, collect plugins interested objects by AppliesTo(), then discovery objects and Execute().
 	var fatalErrs []error
 	if err := b.backupper.BackupWithResolvers(backupLog, backup, backupFile, backupItemActionsResolver, itemBlockActionResolver, pluginManager); err != nil {
 		fatalErrs = append(fatalErrs, err)
@@ -693,6 +757,7 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 	backup.Status.BackupItemOperationsCompleted = opsCompleted
 	backup.Status.BackupItemOperationsFailed = opsFailed
 
+	// zhou: with logrus hook to get each number
 	backup.Status.Warnings = logCounter.GetCount(logrus.WarnLevel)
 	backup.Status.Errors = logCounter.GetCount(logrus.ErrorLevel)
 
@@ -745,6 +810,9 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 	if logFile, err := backupLog.GetPersistFile(); err != nil {
 		fatalErrs = append(fatalErrs, errors.Wrap(err, "error getting backup log file"))
 	} else {
+
+		// zhou: put them to object store.
+
 		if errs := persistBackup(backup, backupFile, logFile, backupStore, volumeSnapshots, volumeSnapshotContents, volumeSnapshotClasses, results, b.globalCRClient, backupLog); len(errs) > 0 {
 			fatalErrs = append(fatalErrs, errs...)
 		}
@@ -799,6 +867,8 @@ func recordBackupMetrics(log logrus.FieldLogger, backup *velerov1api.Backup, bac
 	}
 }
 
+// zhou: encode objects to json file, put backup related files to object store.
+
 func persistBackup(backup *pkgbackup.Request,
 	backupContents, backupLog *os.File,
 	backupStore persistence.BackupStore,
@@ -811,6 +881,8 @@ func persistBackup(backup *pkgbackup.Request,
 ) []error {
 	persistErrs := []error{}
 	backupJSON := new(bytes.Buffer)
+
+	// zhou: encode Backup CR into json
 
 	if err := encode.To(backup.Backup, "json", backupJSON); err != nil {
 		persistErrs = append(persistErrs, errors.Wrap(err, "error encoding backup"))
@@ -884,6 +956,7 @@ func persistBackup(backup *pkgbackup.Request,
 		volumeInfoJSON = nil
 	}
 
+	// zhou: all files need to be put to object store.
 	backupInfo := persistence.BackupInfo{
 		Name:                      backup.Name,
 		Metadata:                  backupJSON,
@@ -899,6 +972,8 @@ func persistBackup(backup *pkgbackup.Request,
 		CSIVolumeSnapshotClasses:  csiSnapshotClassesJSON,
 		BackupVolumeInfo:          volumeInfoJSON,
 	}
+
+	// zhou: put backup related files to Object Store.
 	if err := backupStore.PutBackup(backupInfo); err != nil {
 		persistErrs = append(persistErrs, err)
 	}

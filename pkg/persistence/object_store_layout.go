@@ -25,19 +25,23 @@ import (
 // ObjectStoreLayout defines how Velero's persisted files map to
 // keys in an object storage bucket.
 type ObjectStoreLayout struct {
-	rootPrefix string
-	subdirs    map[string]string
+	rootPrefix string            // zhou: e.g. "velero"
+	subdirs    map[string]string // zhou: e.g. "velero/backups/[backup name]"
 }
+
+// zhou: The layout only depends on user spedified "prefix", e.g. "velero".
 
 func NewObjectStoreLayout(prefix string) *ObjectStoreLayout {
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix = prefix + "/"
 	}
 
+	// zhou: e.g. "velero/backups/[backup name]"
 	subdirs := map[string]string{
 		"backups":  path.Join(prefix, "backups") + "/",
 		"restores": path.Join(prefix, "restores") + "/",
 		"restic":   path.Join(prefix, "restic") + "/",
+		// zhou: what's the content for these two path" ???
 		"metadata": path.Join(prefix, "metadata") + "/",
 		"plugins":  path.Join(prefix, "plugins") + "/",
 		"kopia":    path.Join(prefix, "kopia") + "/",
@@ -69,6 +73,8 @@ func (l *ObjectStoreLayout) getRestoreDir(restore string) string {
 	return path.Join(l.subdirs["restores"], restore) + "/"
 }
 
+// zhou: common files
+
 func (l *ObjectStoreLayout) getBackupMetadataKey(backup string) string {
 	return path.Join(l.subdirs["backups"], backup, "velero-backup.json")
 }
@@ -97,10 +103,12 @@ func (l *ObjectStoreLayout) getBackupResourceListKey(backup string) string {
 	return path.Join(l.subdirs["backups"], backup, fmt.Sprintf("%s-resource-list.json.gz", backup))
 }
 
+// zhou: [bucket]:[prefix]/restores/[restore name]/restore-[restore name]-logs.gz
 func (l *ObjectStoreLayout) getRestoreLogKey(restore string) string {
 	return path.Join(l.subdirs["restores"], restore, fmt.Sprintf("restore-%s-logs.gz", restore))
 }
 
+// zhou: [bucket]:[prefix]/restores/[restore name]/restore-[restore name]-results.gz
 func (l *ObjectStoreLayout) getRestoreResultsKey(restore string) string {
 	return path.Join(l.subdirs["restores"], restore, fmt.Sprintf("restore-%s-results.gz", restore))
 }

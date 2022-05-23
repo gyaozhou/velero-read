@@ -41,6 +41,8 @@ type volumeBackupInfo struct {
 	repositoryType string
 }
 
+// zhou: maybe more than one volume within a pod. Get a list of Snapshot id.
+
 // GetVolumeBackupsForPod returns a map, of volume name -> snapshot id,
 // of the PodVolumeBackups that exist for the provided pod.
 func GetVolumeBackupsForPod(podVolumeBackups []*velerov1api.PodVolumeBackup, pod *corev1api.Pod, sourcePodNs string) map[string]string {
@@ -174,6 +176,8 @@ func isPVBMatchPod(pvb *velerov1api.PodVolumeBackup, podName string, namespace s
 	return podName == pvb.Spec.Pod.Name && namespace == pvb.Spec.Pod.Namespace
 }
 
+// zhou: why it will be backed up.
+
 // volumeHasNonRestorableSource checks if the given volume exists in the list of podVolumes
 // and returns true if the volume's source is not restorable. This is true for volumes with
 // a Projected or DownwardAPI source.
@@ -187,6 +191,10 @@ func volumeHasNonRestorableSource(volumeName string, podVolumes []corev1api.Volu
 	}
 	return volume.Projected != nil || volume.DownwardAPI != nil
 }
+
+// zhou: when "SnapshotID" has not been added to "PodVolumeBackup.Spec", it is preserved in
+//       Pod's Annotations.
+//       It's deprecated, but useful to restore legacy backup.
 
 // getPodSnapshotAnnotations returns a map, of volume name -> snapshot id,
 // of all snapshots for this pod.

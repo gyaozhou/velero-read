@@ -23,12 +23,18 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: Backup Item Action plugin interface
+//       implemented by "restartableBackupItemAction struct",
+
 // BackupItemAction is an actor that performs an operation on an individual item being backed up.
 type BackupItemAction interface {
 	// AppliesTo returns information about which resources this action should be invoked for.
 	// A BackupItemAction's Execute function will only be invoked on items that match the returned
 	// selector. A zero-valued ResourceSelector matches all resources.
 	AppliesTo() (velero.ResourceSelector, error)
+
+	// zhou: "runtime.Unstructured" with modified or unmodified item to be backed up.
+	//       "[]ResourceIdentifier" is the additional items need to backup.
 
 	// Execute allows the ItemAction to perform arbitrary logic with the item being backed up,
 	// including mutating the item itself prior to backup. The item (unmodified or modified)

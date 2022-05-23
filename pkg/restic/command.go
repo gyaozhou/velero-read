@@ -24,6 +24,8 @@ import (
 	"strings"
 )
 
+// zhou: README,
+
 // Command represents a restic command.
 type Command struct {
 	Command        string
@@ -74,6 +76,8 @@ func (c *Command) String() string {
 	return strings.Join(c.StringSlice(), " ")
 }
 
+// zhou: get the "exec.Cmd" to be executed.
+
 // Cmd returns an exec.Cmd for the command.
 func (c *Command) Cmd() *exec.Cmd {
 	parts := c.StringSlice()
@@ -81,6 +85,7 @@ func (c *Command) Cmd() *exec.Cmd {
 	cmd.Dir = c.Dir
 
 	if len(c.Env) > 0 {
+		// zhou: set the cmd execution env
 		cmd.Env = c.Env
 	}
 
@@ -99,6 +104,7 @@ func cacheDirFlag(dir string) string {
 	return fmt.Sprintf("--cache-dir=%s", dir)
 }
 
+// zhou: used by repo on Object Store which is a REST server.
 func cacertFlag(path string) string {
 	return fmt.Sprintf("--cacert=%s", path)
 }

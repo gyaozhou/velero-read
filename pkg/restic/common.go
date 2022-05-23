@@ -32,6 +32,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 )
 
+// zhou:
+
 const (
 
 	// DefaultMaintenanceFrequency is the default time interval
@@ -86,10 +88,14 @@ func (e *environ) Unset(key string) {
 	}
 }
 
+// zhou: get each object store specific env, used for "restic" cli to access object store.
+//       Used by restic repository controller and PodVolumeBackup/PodVolumeRestore controllers.
+
 // CmdEnv returns a list of environment variables (in the format var=val) that
 // should be used when running a restic command for a particular backend provider.
 // This list is the current environment, plus any provider-specific variables restic needs.
 func CmdEnv(backupLocation *velerov1api.BackupStorageLocation, credentialFileStore credentials.FileStore) ([]string, error) {
+
 	var env environ
 	env = os.Environ()
 	customEnv := map[string]string{}
@@ -100,13 +106,21 @@ func CmdEnv(backupLocation *velerov1api.BackupStorageLocation, credentialFileSto
 		config = map[string]string{}
 	}
 
+	// zhou: if BSL specify credential, generate "credsFile" to replace file "/credentials/cloud".
 	if backupLocation.Spec.Credential != nil {
+		// zhou: "/tmp/credentials/[namespace]/[secret name]-[key name]"
 		credsFile, err := credentialFileStore.Path(backupLocation.Spec.Credential)
 		if err != nil {
 			return []string{}, errors.WithStack(err)
 		}
+
+		// zhou: used as env to indicate restic that this BSL using private credential.
+
 		config[repoconfig.CredentialsFileKey] = credsFile
 	}
+
+	// zhou: FIXME, Object Store for metadata's backup could be any vendor's plugin.
+	//       Why restic volume object store is hard coded such three vendors ???
 
 	backendType := repoconfig.GetBackendType(backupLocation.Spec.Provider, backupLocation.Spec.Config)
 

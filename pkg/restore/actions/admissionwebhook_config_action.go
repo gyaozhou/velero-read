@@ -25,6 +25,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/admission-webhook-configuration"}
+
 // AdmissionWebhookConfigurationAction is a RestoreItemAction plugin applicable to mutatingwebhookconfiguration and
 // validatingwebhookconfiguration to reset the invalid value for "sideEffects" of the webhooks.
 // More background please refer to https://github.com/vmware-tanzu/velero/issues/3516

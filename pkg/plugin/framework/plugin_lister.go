@@ -28,9 +28,12 @@ import (
 
 // PluginIdentifier uniquely identifies a plugin by command, kind, and name.
 type PluginIdentifier struct {
+	// zhou: plugin binary name, e.g. "velero-plugin-for-csi"
 	Command string
-	Kind    common.PluginKind
-	Name    string
+	// zhou: plugin Kind, e.g. "PluginKindBackupItemAction"
+	Kind common.PluginKind
+	// zhou: registered plugin name, e.g. "velero.io/csi-pvc-backupper"
+	Name string
 }
 
 // PluginLister lists plugins.
@@ -59,6 +62,8 @@ type PluginListerPlugin struct {
 	impl PluginLister
 }
 
+// zhou:
+
 // NewPluginListerPlugin creates a new PluginListerPlugin with impl as the server-side implementation.
 func NewPluginListerPlugin(impl PluginLister) *PluginListerPlugin {
 	return &PluginListerPlugin{impl: impl}
@@ -77,6 +82,8 @@ func (p *PluginListerPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker,
 type PluginListerGRPCClient struct {
 	grpcClient proto.PluginListerClient
 }
+
+// zhou:
 
 // ListPlugins uses the gRPC client to request the list of plugins from the server. It translates the protobuf response
 // to []PluginIdentifier.
@@ -120,6 +127,7 @@ type PluginListerGRPCServer struct {
 
 // ListPlugins returns a list of registered plugins, delegating to s.impl to perform the listing.
 func (s *PluginListerGRPCServer) ListPlugins(ctx context.Context, req *proto.Empty) (*proto.ListPluginsResponse, error) {
+	// zhou: return  each plugin's main registered identifiers.
 	list, err := s.impl.ListPlugins()
 	if err != nil {
 		return nil, err

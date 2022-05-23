@@ -33,6 +33,12 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 )
 
+// zhou: only support these PluginKind "BackupItemAction", "RestoreItemAction", "DeleteItemAction",
+//       "ItemSnapshotter". These PluginKind need resolve by "AppliesTo()" before execution !!!
+//
+//       "PluginKindObjectStore" is used access object storage.
+//       "PluginKindVolumeSnapshotter" is used to take clould volumesnapshot directly.
+
 /*
 Velero has a variety of Actions that can be executed on Kubernetes resources.  The Actions (BackupItemAction, RestoreItemAction
 and others) implement the Applicable interface which returns a ResourceSelector for the Action.  The ResourceSelector
@@ -49,12 +55,17 @@ type ResolvedAction interface {
 		log logrus.FieldLogger) bool
 }
 
+// zhou: AppliesTo() return values.
+
 // resolvedAction is a core struct that holds the resolved namespaces, resource names and labels
 type resolvedAction struct {
 	ResourceIncludesExcludes  *collections.IncludesExcludes
 	NamespaceIncludesExcludes *collections.IncludesExcludes
 	Selector                  labels.Selector
 }
+
+// zhou: check whether this resource matchs Plugins' resolved actions.
+//       If yes, the following code will rpc Execution() of plugin.
 
 func (recv resolvedAction) ShouldUse(groupResource schema.GroupResource, namespace string, metadata metav1.Object,
 	log logrus.FieldLogger) bool {
@@ -80,14 +91,22 @@ func (recv resolvedAction) ShouldUse(groupResource schema.GroupResource, namespa
 	return true
 }
 
+// zhou: resolve means get such plugins' interested resources via AppliesTo()
+//       In backup: PluginKindBackupItemAction, PluginKindItemSnapshotter,
+//       In restore: PluginKindRestoreItemAction,
+//       In delete: PluginKindDeleteItemAction,
+
 // resolveAction resolves the resources, namespaces and selector into fully-qualified versions
 func resolveAction(helper discovery.Helper, action velero.Applicable) (resources *collections.IncludesExcludes,
 	namespaces *collections.IncludesExcludes, selector labels.Selector, err error) {
+
+	// zhou: invoke plugin's AppliesTo() via rpc, get "velero.ResourceSelector"
 	resourceSelector, err := action.AppliesTo()
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
+	// zhou: formalize resource.group
 	resources = collections.GetResourceIncludesExcludes(helper, resourceSelector.IncludedResources, resourceSelector.ExcludedResources)
 	namespaces = collections.NewIncludesExcludes().Includes(resourceSelector.IncludedNamespaces...).Excludes(resourceSelector.ExcludedNamespaces...)
 
@@ -101,13 +120,17 @@ func resolveAction(helper discovery.Helper, action velero.Applicable) (resources
 	return
 }
 
+// zhou: used to aggregate the result of BackupItemAction plugins' AppliesTo()
 type BackupItemResolvedAction struct {
 	biav1.BackupItemAction
 	resolvedAction
 }
 
+// zhou: create "BackupItemActionResolver" instance, which used to invoke Plugin's "AppliesTo()".
+
 func NewBackupItemActionResolver(actions []biav1.BackupItemAction) BackupItemActionResolver {
 	return BackupItemActionResolver{
+		// zhou: get via "pluginManager.GetBackupItemActions()"
 		actions: actions,
 	}
 }
@@ -145,13 +168,20 @@ type ActionResolver interface {
 	ResolveAction(helper discovery.Helper, action velero.Applicable, log logrus.FieldLogger) (ResolvedAction, error)
 }
 
+// zhou: used to handle "AppliesTo()" on each BackupItemAction plugins.
+//       On the other side, "itemBackupper struct" is used to handle "Execute()".
+
 type BackupItemActionResolver struct {
 	actions []biav1.BackupItemAction
 }
 
+// zhou: rpc "AppliesTo()" over PluginKindRestoreItemAction plugin
+
 func (recv BackupItemActionResolver) ResolveActions(helper discovery.Helper, log logrus.FieldLogger) ([]BackupItemResolvedAction, error) {
 	var resolved []BackupItemResolvedAction
+	// zhou: Action knows how to talk with plugin process.
 	for _, action := range recv.actions {
+		// zhou: invoke "AppliesTo()" over each "BackupItemAction"
 		resources, namespaces, selector, err := resolveAction(helper, action)
 		if err != nil {
 			return nil, err
@@ -195,6 +225,8 @@ func (recv BackupItemActionResolverV2) ResolveActions(helper discovery.Helper, l
 	return resolved, nil
 }
 
+// zhou: used to aggregate the result of RestoreItemAction plugins' AppliesTo()
+
 type RestoreItemResolvedAction struct {
 	riav1.RestoreItemAction
 	resolvedAction
@@ -209,9 +241,12 @@ type RestoreItemActionResolver struct {
 	actions []riav1.RestoreItemAction
 }
 
+// zhou: invoke "AppliesTo()" over each registered plugin of type "RestoreItemAction".
+
 func (recv RestoreItemActionResolver) ResolveActions(helper discovery.Helper, log logrus.FieldLogger) ([]RestoreItemResolvedAction, error) {
 	var resolved []RestoreItemResolvedAction
 	for _, action := range recv.actions {
+		// zhou: invoke "AppliesTo()" over each
 		resources, namespaces, selector, err := resolveAction(helper, action)
 		if err != nil {
 			return nil, err
@@ -253,6 +288,8 @@ func (recv RestoreItemActionResolverV2) ResolveActions(helper discovery.Helper, 
 	return resolved, nil
 }
 
+// zhou: used to aggregate the result of DeleteItemAction plugins' AppliesTo()
+
 type DeleteItemResolvedAction struct {
 	velero.DeleteItemAction
 	resolvedAction
@@ -262,9 +299,12 @@ type DeleteItemActionResolver struct {
 	actions []velero.DeleteItemAction
 }
 
+// zhou: invoke "AppliesTo()" over each registered plugin of type "DeleteItemAction".
+
 func (recv DeleteItemActionResolver) ResolveActions(helper discovery.Helper, log logrus.FieldLogger) ([]DeleteItemResolvedAction, error) {
 	var resolved []DeleteItemResolvedAction
 	for _, action := range recv.actions {
+		// zhou: invoke "AppliesTo()" over each.
 		resources, namespaces, selector, err := resolveAction(helper, action)
 		if err != nil {
 			return nil, err

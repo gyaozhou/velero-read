@@ -59,6 +59,8 @@ type backupSyncReconciler struct {
 	logger                  logrus.FieldLogger
 }
 
+// zhou: sync Backup, Restic PodVolumeBackup, CSI VolumeSnapshotContent from object storage
+
 // NewBackupSyncReconciler is used to generate BackupSync reconciler structure.
 func NewBackupSyncReconciler(
 	client client.Client,
@@ -97,6 +99,9 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	defer pluginManager.CleanupClients()
 
 	log.Debug("Checking backup location for backups to sync into cluster")
+
+	// zhou: List backups in each BSL's object storage, resync such CRs:
+	//       Backup, related PodVolumeBackup CRs, related CSI VolumeSnapshot CRs.
 
 	backupStore, err := b.backupStoreGetter.Get(location, pluginManager, log)
 	if err != nil {
@@ -248,6 +253,7 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				log.WithError(errors.WithStack(err)).Error("Error getting CSI VolumeSnapClasses for this backup from backup store")
 				continue
 			}
+
 			for _, vsClass := range vsClasses {
 				vsClass.ResourceVersion = ""
 				err := b.client.Create(ctx, vsClass, &client.CreateOptions{})
@@ -331,6 +337,9 @@ func (b *backupSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named(constant.ControllerBackupSync).
 		Complete(b)
 }
+
+// zhou: delete Backup CR whose phase is completed and not exist in object storage.
+//       Then it depends PodVolumeBackup CRs are also deleted.
 
 // deleteOrphanedBackups deletes backup objects (CRDs) from Kubernetes that have the specified location
 // and a phase of Completed, but no corresponding backup in object storage.

@@ -57,6 +57,9 @@ type Backupper interface {
 	ListPodVolumeBackupsByPod(podNamespace, podName string) ([]*velerov1api.PodVolumeBackup, error)
 }
 
+// zhou: each backup controller reconcile will create a restic backupper.
+//
+//	It is used to create PodVolumeBackup and wait for completion.
 type backupper struct {
 	ctx                 context.Context
 	repoLocker          *repository.RepoLocker
@@ -66,6 +69,9 @@ type backupper struct {
 	pvbInformer         ctrlcache.Informer
 	handlerRegistration cache.ResourceEventHandlerRegistration
 	wg                  sync.WaitGroup
+
+	// zhou: used to queue PodVolumeBackup update event, backup controller will wait for completion. key == pod namespace/name, so there are many PodVolumeBackup events go via a channel ???
+
 	// pvbIndexer holds all PVBs created by this backuper and is capable to search
 	// the PVBs based on specific properties quickly because of the embedded indexes.
 	// The statuses of the PVBs are got updated when Informer receives update events.
@@ -132,6 +138,11 @@ func podVolumeBackupKey(obj any) (string, error) {
 	return fmt.Sprintf(pvbKeyPattern, pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name, pvb.Spec.Volume), nil
 }
 
+// zhou: create restic backup handler, which watchs the PodVolumebBackup CR phase changes.
+//
+//	If its phase becomes "PodVolumeBackupPhaseCompleted" or "PodVolumeBackupPhaseFailed",
+//	notify backup controller to continue processing.
+
 func newBackupper(
 	ctx context.Context,
 	log logrus.FieldLogger,
@@ -142,6 +153,7 @@ func newBackupper(
 	uploaderType string,
 	backup *velerov1api.Backup,
 ) *backupper {
+
 	b := &backupper{
 		ctx:          ctx,
 		repoLocker:   repoLocker,
@@ -155,6 +167,8 @@ func newBackupper(
 		}),
 	}
 
+	// zhou: PodVolumeBackup CR informer
+
 	b.handlerRegistration, _ = pvbInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			UpdateFunc: func(_, obj any) {
@@ -167,6 +181,8 @@ func newBackupper(
 				if pvb.GetLabels()[velerov1api.BackupUIDLabel] != string(backup.UID) {
 					return
 				}
+
+				// zhou: in predict, sent via channel. Because Informer running in seperate thread.
 
 				if pvb.Status.Phase != velerov1api.PodVolumeBackupPhaseCompleted &&
 					pvb.Status.Phase != velerov1api.PodVolumeBackupPhaseFailed {
@@ -209,6 +225,10 @@ func (b *backupper) getMatchAction(resPolicies *resourcepolicies.Policies, pvc *
 }
 
 var funcGetRepositoryType = getRepositoryType
+
+// zhou: create a PodVolumeBackup CR and wait for its completion.
+//       It is working in backup controller, wait for restic server/pod volume backup controller to
+//       complete moving data.
 
 func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.Pod, volumesToBackup []string, resPolicies *resourcepolicies.Policies, log logrus.FieldLogger) ([]*velerov1api.PodVolumeBackup, *PVCBackupSummary, []error) {
 	if len(volumesToBackup) == 0 {
@@ -268,11 +288,17 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 		return nil, pvcSummary, []error{err}
 	}
 
+	// zhou: secure the restic repo is init. If not, create a ResticRepository CR and block to wait.
+
 	repo, err := b.repoEnsurer.EnsureRepo(b.ctx, backup.Namespace, pod.Namespace, backup.Spec.StorageLocation, repositoryType)
 	if err != nil {
 		skipAllPodVolumes(pod, volumesToBackup, err, pvcSummary, log)
 		return nil, pvcSummary, []error{err}
 	}
+
+	// zhou: backup from Restic repo
+	//       Read lock to protect "restic -r xxx backup" in Restic DaemonSet by creating and waiting
+	//       the PodVolumeBackup CRs' completion.
 
 	// get a single non-exclusive lock since we'll wait for all individual
 	// backups to be complete before releasing it.
@@ -280,12 +306,13 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 	defer b.repoLocker.Unlock(repo.Name)
 
 	var (
-		podVolumeBackups   []*velerov1api.PodVolumeBackup
-		mountedPodVolumes  = sets.Set[string]{}
+		podVolumeBackups   []*velerov1api.PodVolumeBackup // zhou: volumes have been completed (include failed).
+		mountedPodVolumes  = sets.Set[string]{}           // zhou: all volumes mounted by this Pod
 		attachedPodDevices = sets.Set[string]{}
 	)
 
 	for _, container := range pod.Spec.Containers {
+		// zhou: "volumeMount" is the volume name defined in this Pod
 		for _, volumeMount := range container.VolumeMounts {
 			mountedPodVolumes.Insert(volumeMount.Name)
 		}
@@ -305,6 +332,9 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 			log.Warnf("No volume named %s found in pod %s/%s, skipping", volumeName, pod.Namespace, pod.Name)
 			continue
 		}
+
+		// zhou: if the "pod.spec.volumes" is type of PersistentVolumeClaim, then we need to get PVC object.
+
 		var pvc *corev1api.PersistentVolumeClaim
 		if volume.PersistentVolumeClaim != nil {
 			pvc, ok = pvcSummary.pvcMap[volumeName]
@@ -355,6 +385,8 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 			continue
 		}
 
+		// zhou: init and create PodVolumeBackup CR to trigger restic daemonset to work.
+
 		volumeBackup := newPodVolumeBackup(backup, pod, volume, repoIdentifier, b.uploaderType, pvc)
 		// the PVB must be added into the indexer before creating it in API server otherwise unexpected behavior may happen:
 		// the PVB may be handled very quickly by the controller and the informer handler will insert the PVB before "b.pvbIndexer.Add(volumeBackup)" runs,
@@ -387,6 +419,8 @@ func (b *backupper) WaitAllPodVolumesProcessed(log logrus.FieldLogger) []*velero
 		}
 	}()
 
+	// zhou: wait for PodVolumeBackup CR completion
+
 	var podVolumeBackups []*velerov1api.PodVolumeBackup
 	// if no pod volume backups are tracked, return directly to avoid issue mentioned in
 	// https://github.com/vmware-tanzu/velero/issues/8723
@@ -402,8 +436,13 @@ func (b *backupper) WaitAllPodVolumesProcessed(log logrus.FieldLogger) []*velero
 
 	select {
 	case <-b.ctx.Done():
+
+		// zhou: abort to update PodVolumeBackup CR.
+
 		log.Error("timed out waiting for all PodVolumeBackups to complete")
 	case <-done:
+		// zhou: block here to wait PodVolumeBackup status changes.
+
 		for _, obj := range b.pvbIndexer.List() {
 			pvb, ok := obj.(*velerov1api.PodVolumeBackup)
 			if !ok {
@@ -457,9 +496,14 @@ func skipAllPodVolumes(pod *corev1api.Pod, volumesToBackup []string, err error, 
 	}
 }
 
+// zhou: exclude Pod inline volume type is HostPath, and exclude HostPath as PV.
+
 // isHostPathVolume returns true if the volume is either a hostPath pod volume or a persistent
 // volume claim on a hostPath persistent volume, or false otherwise.
 func isHostPathVolume(volume *corev1api.Volume, pvc *corev1api.PersistentVolumeClaim, crClient ctrlclient.Client) (bool, error) {
+
+	// zhou: should already did in "GetVolumesByPod()"
+
 	if volume.HostPath != nil {
 		return true, nil
 	}
@@ -467,6 +511,8 @@ func isHostPathVolume(volume *corev1api.Volume, pvc *corev1api.PersistentVolumeC
 	if pvc == nil || pvc.Spec.VolumeName == "" {
 		return false, nil
 	}
+
+	// zhou: verify that the PV is not using the HostPath as volume type.
 
 	pv := new(corev1api.PersistentVolume)
 	err := crClient.Get(context.TODO(), ctrlclient.ObjectKey{Name: pvc.Spec.VolumeName}, pv)
@@ -477,11 +523,15 @@ func isHostPathVolume(volume *corev1api.Volume, pvc *corev1api.PersistentVolumeC
 	return pv.Spec.HostPath != nil, nil
 }
 
+// zhou: create PodVolumeBackup CR
+
 func newPodVolumeBackup(backup *velerov1api.Backup, pod *corev1api.Pod, volume corev1api.Volume, repoIdentifier, uploaderType string, pvc *corev1api.PersistentVolumeClaim) *velerov1api.PodVolumeBackup {
 	pvb := &velerov1api.PodVolumeBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:    backup.Namespace,
 			GenerateName: backup.Name + "-",
+			// zhou: PVB deletion will not trigger any action.
+			//       The "restic forget" is triggered by DeleteBackupRequest.
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: velerov1api.SchemeGroupVersion.String(),
@@ -491,6 +541,7 @@ func newPodVolumeBackup(backup *velerov1api.Backup, pod *corev1api.Pod, volume c
 					Controller: boolptr.True(),
 				},
 			},
+			// zhou: these labels are useful.
 			Labels: map[string]string{
 				velerov1api.BackupNameLabel: label.GetValidName(backup.Name),
 				velerov1api.BackupUIDLabel:  string(backup.UID),

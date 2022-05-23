@@ -27,6 +27,9 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: implement "ObjectStore interface",
+//       used to talk with this plugin process's ObjectStore interface.
+
 // restartableObjectStore is an object store for a given implementation (such as "aws"). It is associated with
 // a restartableProcess, which may be shared and used to run multiple plugins. At the beginning of each method
 // call, the restartableObjectStore asks its restartableProcess to restart itself if needed (e.g. if the

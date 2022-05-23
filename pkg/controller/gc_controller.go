@@ -187,6 +187,7 @@ func (c *gcReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		}
 	}
 
+	// zhou: GC controller perform actions via DeleteBackupRequest CR which handled by controller.
 	log.Info("Creating a new deletion request")
 	ndbr := pkgbackup.NewDeleteBackupRequest(backup.Name, string(backup.UID))
 	ndbr.SetNamespace(backup.Namespace)

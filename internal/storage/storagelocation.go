@@ -37,6 +37,8 @@ type DefaultBackupLocationInfo struct {
 	ServerValidationFrequency time.Duration
 }
 
+// zhou: README,
+
 // IsReadyToValidate calculates if a given backup storage location is ready to be validated.
 //
 // Rules:
@@ -73,6 +75,8 @@ func IsReadyToValidate(bslValidationFrequency *metav1.Duration, lastValidationTi
 	nextValidation := lastValidation.Add(validationFrequency) // next validation time: last validation time + validation frequency
 	return !time.Now().UTC().Before(nextValidation)           // ready only when NOW is equal to or after the next validation time
 }
+
+// zhou: fetch all BSL in this Velero.
 
 // ListBackupStorageLocations verifies if there are any backup storage locations.
 // For all purposes, if either there is an error while attempting to fetch items or

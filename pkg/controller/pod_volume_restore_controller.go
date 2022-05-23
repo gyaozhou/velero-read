@@ -104,6 +104,10 @@ func (c *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	initContainerIndex := getInitContainerIndex(pod)
+
+	// zhou: restic volume restore container should be the first init container, otherwise other
+	//       init containers may meet problems.
+
 	if initContainerIndex > 0 {
 		log.Warnf(`Init containers before the %s container may cause issues
 		          if they interfere with volumes being restored: %s index %d`, restorehelper.WaitInitContainer, restorehelper.WaitInitContainer, initContainerIndex)
@@ -256,6 +260,8 @@ func isInitContainerRunning(pod *corev1api.Pod) bool {
 		pod.Status.InitContainerStatuses[i].State.Running != nil
 }
 
+// zhou: restic restore should be performed in application's init container.
+
 func getInitContainerIndex(pod *corev1api.Pod) int {
 	// Pod volume wait container can be anywhere in the list of init containers so locate it.
 	for i, initContainer := range pod.Spec.InitContainers {
@@ -279,12 +285,19 @@ func (c *PodVolumeRestoreReconciler) OnDataPathCompleted(ctx context.Context, na
 		log.WithError(err).Warn("Failed to get PVR on completion")
 		return
 	}
+	// zhou: we don't the "volume-plugin-name", so have to use glob "*".
 
 	volumePath := result.Restore.Target.ByPath
 	if volumePath == "" {
 		_, _ = c.errorOut(ctx, &pvr, errors.New("path is empty"), "invalid restore target", log)
 		return
 	}
+
+	// zhou: It means restore successful here.
+	//       A folder ".Velero" within volume, and files naming with Restore CR uid is used to
+	//       indicate the completion of PodVolumeRestore. The Init Container
+	//       (velero-restic-restore-helper) within user's application pod will watch it.
+	//       There are maybe some leftover from last restore.
 
 	// Remove the .velero directory from the restored volume (it may contain done files from previous restores
 	// of this volume, which we don't want to carry over). If this fails for any reason, log and continue, since
@@ -296,6 +309,10 @@ func (c *PodVolumeRestoreReconciler) OnDataPathCompleted(ctx context.Context, na
 
 	var restoreUID types.UID
 	for _, owner := range pvr.OwnerReferences {
+
+		// zhou: the controller flag should be set by Restore controller when creating this
+		//       PodVolumeBackup CR.
+
 		if boolptr.IsSetToTrue(owner.Controller) {
 			restoreUID = owner.UID
 			break

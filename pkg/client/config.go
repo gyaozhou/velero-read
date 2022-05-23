@@ -40,6 +40,7 @@ type VeleroConfig map[string]any
 // LoadConfig loads the Velero client configuration file and returns it as a VeleroConfig. If the
 // file does not exist, an empty map is returned.
 func LoadConfig() (VeleroConfig, error) {
+	// zhou: "~/.config/velero/config.json"
 	fileName := configFileName()
 
 	_, err := os.Stat(fileName)

@@ -393,6 +393,8 @@ func describeBackupItemOperations(ctx context.Context, kbClient kbclient.Client,
 	}
 }
 
+// zhou: README,
+
 func describeBackupResourceList(ctx context.Context, kbClient kbclient.Client, d *Describer, backup *velerov1api.Backup, insecureSkipTLSVerify bool, caCertPath string) {
 	buf := new(bytes.Buffer)
 	if err := downloadrequest.Stream(ctx, kbClient, backup.Namespace, backup.Name, velerov1api.DownloadTargetKindBackupResourceList, buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertPath); err != nil {

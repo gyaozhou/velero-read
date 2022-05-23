@@ -41,6 +41,8 @@ const (
 	veleroContainer   = "velero"
 )
 
+// zhou: handle `velero plugin add velero/velero-plugin-example`,
+//       Update Velero deployment to add the plugin image into init container.
 func NewAddCommand(f client.Factory) *cobra.Command {
 	var (
 		imagePullPolicies   = []string{string(corev1api.PullAlways), string(corev1api.PullIfNotPresent), string(corev1api.PullNever)}
@@ -61,7 +63,7 @@ func NewAddCommand(f client.Factory) *cobra.Command {
 			if err != nil {
 				cmd.CheckError(err)
 			}
-
+			// zhou: get velero deployment
 			veleroDeploy, err := veleroDeployment(context.TODO(), kubeClient, f.Namespace())
 			if err != nil {
 				cmd.CheckError(err)
@@ -69,6 +71,8 @@ func NewAddCommand(f client.Factory) *cobra.Command {
 
 			original, err := json.Marshal(veleroDeploy)
 			cmd.CheckError(err)
+
+			// zhou: 'plugins' volume, all plugin binary will be copied to this volume by init container
 
 			// ensure the plugins volume & mount exist
 			volumeExists := false
@@ -79,6 +83,7 @@ func NewAddCommand(f client.Factory) *cobra.Command {
 				}
 			}
 
+			// zhou: havn't any plugin been installed
 			if !volumeExists {
 				volume := corev1api.Volume{
 					Name: pluginsVolumeName,
@@ -102,7 +107,7 @@ func NewAddCommand(f client.Factory) *cobra.Command {
 						break
 					}
 				}
-
+				// zhou: it is impossible, since "veleroDeployment()" will check this container.
 				if containerIndex < 0 {
 					cmd.CheckError(errors.New("velero container not found in velero deployment"))
 				}
@@ -122,6 +127,7 @@ func NewAddCommand(f client.Factory) *cobra.Command {
 			patchBytes, err := jsonpatch.CreateMergePatch(original, updated)
 			cmd.CheckError(err)
 
+			// zhou: Json MergePatchType, init container will run automatically once.
 			_, err = kubeClient.AppsV1().Deployments(veleroDeploy.Namespace).Patch(context.TODO(), veleroDeploy.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{})
 			cmd.CheckError(err)
 		},

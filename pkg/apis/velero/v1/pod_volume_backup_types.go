@@ -28,6 +28,8 @@ type PodVolumeBackupSpec struct {
 	// Node is the name of the node that the Pod is running on.
 	Node string `json:"node"`
 
+	// zhou: "ObjectReference" includes kind, Namespace, Name, which is enough to get object.
+
 	// Pod is a reference to the pod containing the volume to be backed up.
 	Pod corev1api.ObjectReference `json:"pod"`
 
@@ -80,6 +82,7 @@ type PodVolumeBackupStatus struct {
 	// +optional
 	Path string `json:"path,omitempty"`
 
+	// zhou: snapshot id from restic
 	// SnapshotID is the identifier for the snapshot of the pod volume.
 	// +optional
 	SnapshotID string `json:"snapshotID,omitempty"`
@@ -126,6 +129,7 @@ type PodVolumeBackupStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:object:generate=true
 
+// zhou: "Status" is NOT subresource
 type PodVolumeBackup struct {
 	metav1.TypeMeta `json:",inline"`
 

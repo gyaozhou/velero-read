@@ -25,16 +25,23 @@ import (
 	protobiav1 "github.com/vmware-tanzu/velero/pkg/plugin/generated"
 )
 
+// zhou: implemented "github.com/hashicorp/go-plugin, type GRPCPlugin interface {}"
+
 // BackupItemActionPlugin is an implementation of go-plugin's Plugin
 // interface with support for gRPC for the backup/ItemAction
 // interface.
 type BackupItemActionPlugin struct {
+	// zhou: disable net/rpc, using "type Plugin interface {}"
+	//       The following "GRPCClient" and "GRPCServer" implement "type GRPCPlugin interface {}"
 	plugin.NetRPCUnsupportedPlugin
+
+	// zhou: defined in pkg/plugin/framework/plugin_base.go
 	*common.PluginBase
 }
 
 // GRPCClient returns a clientDispenser for BackupItemAction gRPC clients.
 func (p *BackupItemActionPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, clientConn *grpc.ClientConn) (any, error) {
+	// zhou: create a client dispenser for each kind Plugin.
 	return common.NewClientDispenser(p.ClientLogger, clientConn, newBackupItemActionGRPCClient), nil
 }
 

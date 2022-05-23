@@ -156,6 +156,8 @@ GOARCH = $(word 2, $(platform_temp))
 GOPROXY ?= https://proxy.golang.org
 GOBIN=$$(pwd)/.go/bin
 
+# zhou: all-build here means all arch binary.
+
 # If you want to build all binaries, see the 'all-build' rule.
 # If you want to build all containers, see the 'all-containers' rule.
 all:
@@ -169,6 +171,7 @@ all-build: $(addprefix build-, $(CLI_PLATFORMS))
 all-containers:
 	@$(MAKE) --no-print-directory container
 
+# zhou: normal path, build local Arch's velero binary
 local: build-dirs
 # Add DEBUG=1 to enable debug locally
 	GOOS=$(GOOS) \
@@ -185,6 +188,7 @@ local: build-dirs
 
 build: _output/bin/$(GOOS)/$(GOARCH)/$(BIN)
 
+# zhou: build specified Arch's binary
 _output/bin/$(GOOS)/$(GOARCH)/$(BIN): build-dirs
 	@echo "building: $@"
 	$(MAKE) shell CMD="-c '\

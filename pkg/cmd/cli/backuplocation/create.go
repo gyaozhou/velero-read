@@ -176,7 +176,7 @@ func (o *CreateOptions) BuildBackupStorageLocation(namespace string, setBackupSy
 	if setValidationFrequency {
 		backupStorageLocation.Spec.ValidationFrequency = &metav1.Duration{Duration: o.ValidationFrequency}
 	}
-
+	// zhou: the Secret object should be created by user.
 	for secretName, secretKey := range o.Credential.Data() {
 		backupStorageLocation.Spec.Credential = builder.ForSecretKeySelector(secretName, secretKey).Result()
 		break

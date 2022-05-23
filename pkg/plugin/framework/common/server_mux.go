@@ -29,17 +29,30 @@ import (
 // (ObjectStore, VolumeSnapshotter, BackupItemAction, RestoreItemAction).
 type HandlerInitializer func(logger logrus.FieldLogger) (any, error)
 
+// zhou: each "PluginKind" owns a map "initializers"
+
 // ServerMux manages multiple implementations of a single plugin kind, such as pod and pvc BackupItemActions.
 type ServerMux struct {
+	// zhou: PluginKindObjectStore/PluginKindVolumeSnapshotter/PluginKindBackupItemAction/...
 	kind         PluginKind
 	initializers map[string]HandlerInitializer
 	Handlers     map[string]any
 	ServerLog    logrus.FieldLogger
 }
 
+// zhou: "serverMux" preserved all methods register to this "PluginKind".
+//       The names is just used to prevent duplicated register???
+
 // NewServerMux returns a new ServerMux.
 func NewServerMux(logger logrus.FieldLogger) *ServerMux {
+	// zhou: does't specify "kind"
 	return &ServerMux{
+		// zhou: plugin implementation should provide this function, which return value is "handler".
+		//       So "HandlerInitializer()" will perform initilization work and return a interface type handler
+		//       to handle solid work.
+		//       The interface will be convert to different interface according to PluginKind.
+		//       The common methods are "AppliesTo()", "Execute()".
+
 		initializers: make(map[string]HandlerInitializer),
 		Handlers:     make(map[string]any),
 		ServerLog:    logger,
@@ -53,6 +66,7 @@ func (m *ServerMux) Register(name string, f HandlerInitializer) {
 		m.ServerLog.Errorf("invalid plugin name %q: %s", name, err)
 		return
 	}
+	// zhou: name as key, HandlerInitializer as value.
 	m.initializers[name] = f
 }
 
@@ -82,6 +96,8 @@ func (m *ServerMux) GetHandler(name string) (any, error) {
 
 	return m.Handlers[name], nil
 }
+
+// zhou: make sure the name is not conflict.
 
 // ValidatePluginName checks if the given name:
 // - the plugin name has two parts separated by '/'

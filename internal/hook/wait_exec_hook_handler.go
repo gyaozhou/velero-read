@@ -33,6 +33,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
+// zhou: implemented by "DefaultWaitExecHookHandler"
+
 type WaitExecHookHandler interface {
 	HandleHooks(
 		ctx context.Context,
@@ -63,12 +65,16 @@ func (d *DefaultListWatchFactory) NewListWatch(namespace string, selector fields
 
 var _ ListWatchFactory = &DefaultListWatchFactory{}
 
+// zhou: used to handle Restore exec container hook.
+
 type DefaultWaitExecHookHandler struct {
 	ListWatchFactory   ListWatchFactory
 	PodCommandExecutor podexec.PodCommandExecutor
 }
 
 var _ WaitExecHookHandler = &DefaultWaitExecHookHandler{}
+
+// zhou: README,
 
 func (e *DefaultWaitExecHookHandler) HandleHooks(
 	ctx context.Context,

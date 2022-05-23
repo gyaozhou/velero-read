@@ -65,6 +65,7 @@ type Helper interface {
 	ServerVersion() *version.Info
 }
 
+// zhou: why not using interface "discovery.serverResourcesInterface" directly?
 type serverResourcesInterface interface {
 	// ServerPreferredResources() is used to populate Resources() with only Preferred Versions - this is the default
 	ServerPreferredResources() ([]*metav1.APIResourceList, error)
@@ -73,6 +74,7 @@ type serverResourcesInterface interface {
 	ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error)
 }
 
+// zhou: README,
 type helper struct {
 	discoveryClient discovery.AggregatedDiscoveryInterface
 	logger          logrus.FieldLogger
@@ -89,6 +91,8 @@ type helper struct {
 
 var _ Helper = &helper{}
 
+// zhou: init object for discovery resources in k8s.
+
 func NewHelper(discoveryClient discovery.AggregatedDiscoveryInterface, logger logrus.FieldLogger) (Helper, error) {
 	h := &helper{
 		discoveryClient: discoveryClient,
@@ -99,6 +103,8 @@ func NewHelper(discoveryClient discovery.AggregatedDiscoveryInterface, logger lo
 	}
 	return h, nil
 }
+
+// zhou: README,
 
 func (h *helper) ResourceFor(input schema.GroupVersionResource) (schema.GroupVersionResource, metav1.APIResource, error) {
 	h.lock.RLock()
@@ -142,6 +148,7 @@ func (h *helper) KindFor(input schema.GroupVersionKind) (schema.GroupVersionReso
 	return schema.GroupVersionResource{}, metav1.APIResource{}, errors.Errorf("APIResource not found for GroupVersionKind %v ", input)
 }
 
+// zhou: updated all resources within the k8s
 func (h *helper) Refresh() error {
 	h.lock.Lock()
 	defer h.lock.Unlock()
@@ -153,6 +160,7 @@ func (h *helper) Refresh() error {
 
 	var serverResources []*metav1.APIResourceList
 
+	// zhou: whether or not to handle multiple API Group Versions
 	if features.IsEnabled(velerov1api.APIGroupVersionsFeatureFlag) {
 		// ServerGroupsAndResources returns all APIGroup and APIResouceList - not only preferred versions
 		_, serverAllResources, err := refreshServerGroupsAndResources(h.discoveryClient, h.logger)
@@ -170,6 +178,7 @@ func (h *helper) Refresh() error {
 		serverResources = serverPreferredResources
 	}
 
+	// zhou:
 	h.resources = discovery.FilteredBy(
 		And(filterByVerbs, skipSubresource),
 		serverResources,
@@ -217,7 +226,10 @@ func (h *helper) Refresh() error {
 	return nil
 }
 
+// zhou:
 func refreshServerPreferredResources(discoveryClient serverResourcesInterface, logger logrus.FieldLogger) ([]*metav1.APIResourceList, error) {
+	// zhou: ServerPreferredResources returns the supported resources with the version preferred by the server
+	//       implemented by discovery.ServerPreferredResources()
 	preferredResources, err := discoveryClient.ServerPreferredResources()
 	if err != nil {
 		if discoveryErr, ok := err.(*discovery.ErrGroupDiscoveryFailed); ok {

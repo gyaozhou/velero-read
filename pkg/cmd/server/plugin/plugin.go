@@ -39,6 +39,9 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/actionhelpers"
 )
 
+// zhou: Some functions implemented following Plugin framework, but compiled into velero binary.
+//       We still treat it as plugin with special binary "velero run-plugins"
+
 func NewCommand(f client.Factory) *cobra.Command {
 	pluginServer := veleroplugin.NewServer()
 	c := &cobra.Command{
@@ -62,6 +65,9 @@ func NewCommand(f client.Factory) *cobra.Command {
 					"velero.io/service-account",
 					newServiceAccountBackupItemAction(f),
 				).
+
+				// zhou: comparing backup, much more actions needed for restore.
+
 				RegisterRestoreItemAction(
 					"velero.io/job",
 					newJobRestoreItemAction,
@@ -74,6 +80,9 @@ func NewCommand(f client.Factory) *cobra.Command {
 					"velero.io/pod-volume-restore",
 					newPodVolumeRestoreItemAction(f),
 				).
+
+				// zhou: add Init Container into application Pod as post hook to execute user specific actions.
+
 				RegisterRestoreItemAction(
 					"velero.io/init-restore-hook",
 					newInitRestoreHookPodAction,
@@ -195,6 +204,9 @@ func NewCommand(f client.Factory) *cobra.Command {
 					newRemapCRDVersionAction(f),
 				)
 			}
+			// zhou: beyond the services registered above, "Serve()" will imexplicit a PluginLister
+			//        service, which used to expose which service supported by this plugin.
+
 			pluginServer.Serve()
 		},
 		FParseErrWhitelist: cobra.FParseErrWhitelist{ // Velero.io word list : ignore
@@ -280,6 +292,10 @@ func newInitRestoreHookPodAction(logger logrus.FieldLogger) (any, error) {
 	return ria.NewInitRestoreHookPodAction(logger), nil
 }
 
+// zhou: get a 'veleroplugin.HandlerInitializer" function.
+//       The reason using this method is, the "ResticRestoreAction{}" depends on two clients.
+//       Espically the PodVolumeBackups which is a CRD.
+
 func newPodVolumeRestoreItemAction(f client.Factory) plugincommon.HandlerInitializer {
 	return func(logger logrus.FieldLogger) (any, error) {
 		client, err := f.KubeClient()
@@ -294,6 +310,7 @@ func newPodVolumeRestoreItemAction(f client.Factory) plugincommon.HandlerInitial
 
 		return ria.NewPodVolumeRestoreAction(logger, client.CoreV1().ConfigMaps(f.Namespace()), crClient, f.Namespace())
 	}
+
 }
 
 func newServiceRestoreItemAction(logger logrus.FieldLogger) (any, error) {
@@ -315,6 +332,8 @@ func newAddPVFromPVCRestoreItemAction(logger logrus.FieldLogger) (any, error) {
 func newCRDV1PreserveUnknownFieldsItemAction(logger logrus.FieldLogger) (any, error) {
 	return ria.NewCRDV1PreserveUnknownFieldsAction(logger), nil
 }
+
+// zhou: used to handle StorageClass convertion in restore.
 
 func newChangeStorageClassRestoreItemAction(f client.Factory) plugincommon.HandlerInitializer {
 	return func(logger logrus.FieldLogger) (any, error) {

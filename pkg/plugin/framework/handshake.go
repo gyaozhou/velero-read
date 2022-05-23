@@ -18,6 +18,9 @@ package framework
 
 import plugin "github.com/hashicorp/go-plugin"
 
+// zhou: generate go-plugin options.
+//       Make sure the Velero is compatible with velero-plugins when communiation.
+
 // Handshake returns the configuration information that allows go-plugin clients and servers to perform a handshake.
 func Handshake() plugin.HandshakeConfig {
 	return plugin.HandshakeConfig{

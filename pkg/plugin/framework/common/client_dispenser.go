@@ -46,6 +46,8 @@ type clientDispenser struct {
 
 type clientInitFunc func(base *ClientBase, clientConn *grpc.ClientConn) any
 
+// zhou: create a client dispenser for each kind Plugin.
+
 // newClientDispenser creates a new clientDispenser.
 func NewClientDispenser(logger logrus.FieldLogger, clientConn *grpc.ClientConn, initFunc clientInitFunc) *clientDispenser {
 	return &clientDispenser{

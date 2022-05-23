@@ -39,21 +39,39 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
 
+// zhou: all these backup file locate at Object Store [bucket]:[prefix]/backups/[backup name]/
 type BackupInfo struct {
 	Name string
+	// zhou: all items belows with type "io.Reader"
+
+	// zhou: file "velero-backup.json"
 	Metadata,
+	// zhou: file "[backup name].tar.gz", includes file "metadata/version", ...
 	Contents,
+	// zhou: file "[backup name]-logs.gz"
 	Log,
 	BackupResults,
+
+	// zhou: file "[backup name]-podvolumebackup.json.gz", PodVolumeBackup CRs.
+	//       Restic backup volume.
 	PodVolumeBackups,
+	// zhou: file "[backup name]-volumesnapshots.json.gz", "volume.Snapshot".
+	//       PluginKindVolumeSnapshotter backup volume.
 	VolumeSnapshots,
+
 	BackupItemOperations,
+	// zhou: file "[backup name]-resource-list.json.gz"
 	BackupResourceList,
+	// zhou: file "[backup name]-csi-volumesnapshots.json.gz", CSI VolumeSnapshot CR.
 	CSIVolumeSnapshots,
 	CSIVolumeSnapshotContents,
-	CSIVolumeSnapshotClasses,
+	CSIVolumeSnapshotClasses, // zhou: file "[backup name]-csi-volumesnapshotcontents.json.gz", CSI VolumeSnapshotContent CR
 	BackupVolumeInfo io.Reader
 }
+
+// zhou: implemented by "objectBackupStore struct"
+//       Unlike BackupItemAction/RestoreItemAction/..., this pluginKind ObjectStore provide
+//       advanced functions based on "ObjectStore interface" (implemented by restartableObjectStore).
 
 // BackupStore defines operations for creating, retrieving, and deleting
 // Velero backup and restore data in/from a persistent backup store.
@@ -62,6 +80,7 @@ type BackupStore interface {
 
 	ListBackups() ([]string, error)
 
+	// zhou: put all files to object store.
 	PutBackup(info BackupInfo) error
 	PutBackupMetadata(backup string, backupMetadata io.Reader) error
 	PutBackupItemOperations(backup string, backupItemOperations io.Reader) error
@@ -98,6 +117,9 @@ type BackupStore interface {
 // DownloadURLTTL is how long a download URL is valid for.
 const DownloadURLTTL = 10 * time.Minute
 
+// zhou: "objectBackupStore" implements interface "persistence.BackupStore" to handle objects,
+//       based on plugin interface "plugin/velero/ObjectStore".
+
 type objectBackupStore struct {
 	objectStore velero.ObjectStore
 	bucket      string
@@ -105,11 +127,17 @@ type objectBackupStore struct {
 	logger      logrus.FieldLogger
 }
 
+// zhou: implemented by plugin "clientmgmt.manager"
+//       Used to get a "restartableObjectStore" instance, which is used to talk with plugin process
+//       via rpc call.
+
 // ObjectStoreGetter is a type that can get a velero.ObjectStore
 // from a provider name.
 type ObjectStoreGetter interface {
 	GetObjectStore(provider string) (velero.ObjectStore, error)
 }
+
+// zhou: implemented by "objectBackupStoreGetter struct".
 
 // ObjectBackupStoreGetter is a type that can get a velero.BackupStore for a
 // given BackupStorageLocation and ObjectStore.
@@ -121,10 +149,16 @@ type objectBackupStoreGetter struct {
 	credentialStore credentials.FileStore
 }
 
+// zhou: "credentialStore" helps to handle BSL credential.
+
 // NewObjectBackupStoreGetter returns a ObjectBackupStoreGetter that can get a velero.BackupStore.
 func NewObjectBackupStoreGetter(credentialStore credentials.FileStore) ObjectBackupStoreGetter {
 	return &objectBackupStoreGetter{credentialStore: credentialStore}
 }
+
+// zhou: With BSL name used in Backup CR and plugin manager "ObjectStoreGetter", find the plugin
+//       which implements this BSL object store. And using credential, varify its accesibility.
+//       Then returns "BackupStore", which is the handler to operate object store.
 
 func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocation, objectStoreGetter ObjectStoreGetter, logger logrus.FieldLogger) (BackupStore, error) {
 	if location.Spec.ObjectStorage == nil {
@@ -167,6 +201,8 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 		objectStoreConfig["caCert"] = string(location.Spec.ObjectStorage.CACert)
 	}
 
+	// zhou:
+
 	// If the BSL specifies a credential, fetch its path on disk and pass to
 	// plugin via the config.
 	if location.Spec.Credential != nil {
@@ -175,13 +211,20 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 			return nil, errors.Wrap(err, "unable to get credentials")
 		}
 
+		// zhou: let object storage plugin using the private credentital file if the plugin
+		//       supports this feature.
+
 		objectStoreConfig["credentialsFile"] = credsFile
 	}
 
+	// zhou: "manager.GetObjectStore()" get a "restartableObjectStore" instance by the "Provider"
+	//       in BSL CR. e.g. "aws" corresponding to register plugin name "velero.io/aws".
 	objectStore, err := objectStoreGetter.GetObjectStore(location.Spec.Provider)
 	if err != nil {
 		return nil, err
 	}
+
+	// zhou: let plugin to perform Init().
 
 	if err := objectStore.Init(objectStoreConfig); err != nil {
 		return nil, err
@@ -200,6 +243,7 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 	}, nil
 }
 
+// zhou: README,
 func (s *objectBackupStore) IsValid() error {
 	dirs, err := s.objectStore.ListCommonPrefixes(s.bucket, s.layout.rootPrefix, "/")
 	if err != nil {
@@ -225,7 +269,9 @@ func (s *objectBackupStore) IsValid() error {
 	return nil
 }
 
+// zhou: get backups from this object storage by prefix matching.
 func (s *objectBackupStore) ListBackups() ([]string, error) {
+	// zhou: matched prefix list, "[bucket name]/
 	prefixes, err := s.objectStore.ListCommonPrefixes(s.bucket, s.layout.subdirs["backups"], "/")
 	if err != nil {
 		return nil, err
@@ -249,22 +295,29 @@ func (s *objectBackupStore) ListBackups() ([]string, error) {
 	return output, nil
 }
 
+// zhou: put all backup related files to Object Store
+
 func (s *objectBackupStore) PutBackup(info BackupInfo) error {
+	// zhou: try to upload "[backup name]-logs.gz"
 	if err := seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupLogKey(info.Name), info.Log); err != nil {
 		// Uploading the log file is best-effort; if it fails, we log the error but it doesn't impact the
 		// backup's status.
 		s.logger.WithError(err).WithField("backup", info.Name).Error("Error uploading log file")
 	}
 
+	// zhou: try to upload "velero-backup.json"
 	if err := seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupMetadataKey(info.Name), info.Metadata); err != nil {
 		// failure to upload metadata file is a hard-stop
 		return err
 	}
 
+	// zhou: try to upload "[backup name].tar.gz"
 	if err := seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupContentsKey(info.Name), info.Contents); err != nil {
 		deleteErr := s.objectStore.DeleteObject(s.bucket, s.layout.getBackupMetadataKey(info.Name))
 		return kerrors.NewAggregate([]error{err, deleteErr})
 	}
+
+	// zhou: try to upload others.
 
 	// Since the logic for all of these files is the exact same except for the name and the contents,
 	// use a map literal to iterate through them and write them to the bucket.
@@ -284,6 +337,8 @@ func (s *objectBackupStore) PutBackup(info BackupInfo) error {
 		if err := seekAndPutObject(s.objectStore, s.bucket, key, reader); err != nil {
 			errs := []error{err}
 
+			// zhou: why not upload "info.Metadata" at last?
+
 			// attempt to clean up the backup contents and metadata if we fail to upload and of the extra files.
 			deleteErr := s.objectStore.DeleteObject(s.bucket, s.layout.getBackupContentsKey(info.Name))
 			errs = append(errs, deleteErr)
@@ -296,6 +351,8 @@ func (s *objectBackupStore) PutBackup(info BackupInfo) error {
 
 	return nil
 }
+
+// zhou: get file "velero-backup.json" from object storage, and decode to Backup CR.
 
 func (s *objectBackupStore) GetBackupMetadata(name string) (*velerov1api.Backup, error) {
 	metadataKey := s.layout.getBackupMetadataKey(name)
@@ -330,6 +387,8 @@ func (s *objectBackupStore) GetBackupMetadata(name string) (*velerov1api.Backup,
 func (s *objectBackupStore) PutBackupMetadata(backup string, backupMetadata io.Reader) error {
 	return seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupMetadataKey(backup), backupMetadata)
 }
+
+// zhou: get file "[backup name]-volumesnapshots.json.gz" and decode to "volume.Snapshot".
 
 func (s *objectBackupStore) GetBackupVolumeSnapshots(name string) ([]*volume.Snapshot, error) {
 	// if the volumesnapshots file doesn't exist, we don't want to return an error, since
@@ -408,6 +467,8 @@ func tryGet(objectStore velero.ObjectStore, bucket, key string) (io.ReadCloser, 
 	return objectStore.GetObject(bucket, key)
 }
 
+// zhou: README,
+
 // decode extracts a .json.gz file reader into the object pointed to
 // by 'into'.
 func decode(jsongzReader io.Reader, into any) error {
@@ -442,6 +503,9 @@ func (s *objectBackupStore) GetCSIVolumeSnapshotClasses(name string) ([]*snapsho
 	return csiVSClasses, nil
 }
 
+// zhou: get file "[backup name]-csi-volumesnapshots.json.gz" from object storage, and decode to
+//       VolumeSnapshot CR. "name" is the Backup CR.
+
 func (s *objectBackupStore) GetCSIVolumeSnapshots(name string) ([]*snapshotv1api.VolumeSnapshot, error) {
 	res, err := tryGet(s.objectStore, s.bucket, s.layout.getCSIVolumeSnapshotKey(name))
 	if err != nil {
@@ -460,6 +524,9 @@ func (s *objectBackupStore) GetCSIVolumeSnapshots(name string) ([]*snapshotv1api
 	return csiSnaps, nil
 }
 
+// zhou: get file "[backup name]-csi-volumesnapshotcontents.json.gz" from object storage, and decode to
+//       VolumeSnapshotContent CR. "name" is the Backup CR.
+
 func (s *objectBackupStore) GetCSIVolumeSnapshotContents(name string) ([]*snapshotv1api.VolumeSnapshotContent, error) {
 	res, err := tryGet(s.objectStore, s.bucket, s.layout.getCSIVolumeSnapshotContentsKey(name))
 	if err != nil {
@@ -477,6 +544,9 @@ func (s *objectBackupStore) GetCSIVolumeSnapshotContents(name string) ([]*snapsh
 	}
 	return snapConts, nil
 }
+
+// zhou: get file "[backup name]-podvolumebackup.json.gz" from object storage, and decode to
+//       PodVolumeBackup CR. "name" is the Backup CR.
 
 func (s *objectBackupStore) GetPodVolumeBackups(name string) ([]*velerov1api.PodVolumeBackup, error) {
 	// if the podvolumebackups file doesn't exist, we don't want to return an error, since
@@ -541,15 +611,22 @@ func (s *objectBackupStore) GetRestoreResults(name string) (map[string]results.R
 	return results, nil
 }
 
+// zhou: get file "[backup name].tar.gz"
+
 func (s *objectBackupStore) GetBackupContents(name string) (io.ReadCloser, error) {
 	return s.objectStore.GetObject(s.bucket, s.layout.getBackupContentsKey(name))
 }
+
+// zhou: check file "velero-backup.json" in object store.
 
 func (s *objectBackupStore) BackupExists(bucket, backupName string) (bool, error) {
 	return s.objectStore.ObjectExists(bucket, s.layout.getBackupMetadataKey(backupName))
 }
 
+// zhou: delete backup related objects.
+
 func (s *objectBackupStore) DeleteBackup(name string) error {
+	// zhou: list objects match prefix "velero/backups/[backup name]"
 	objects, err := s.objectStore.ListObjects(s.bucket, s.layout.getBackupDir(name))
 	if err != nil {
 		return err
@@ -560,10 +637,13 @@ func (s *objectBackupStore) DeleteBackup(name string) error {
 		s.logger.WithFields(logrus.Fields{
 			"key": key,
 		}).Debug("Trying to delete object")
+		// zhou: delete object one by one.
 		if err := s.objectStore.DeleteObject(s.bucket, key); err != nil {
 			errs = append(errs, err)
 		}
 	}
+
+	// zhou: no need delete "velero/backups/[backup name]", object storage treat it as prefix only.
 
 	return errors.WithStack(kerrors.NewAggregate(errs))
 }
@@ -679,6 +759,9 @@ func seekToBeginning(r io.Reader) error {
 	return err
 }
 
+// zhou: in order to upload the whole file, seeking this local file's cursor to beginning.
+//
+//	Then put it to object store.
 func seekAndPutObject(objectStore velero.ObjectStore, bucket, key string, file io.Reader) error {
 	if file == nil {
 		return nil

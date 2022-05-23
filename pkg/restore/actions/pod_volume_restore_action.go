@@ -52,6 +52,12 @@ const (
 	restoreHelperUID       = 1000
 )
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/restic"}
+//
+//       Bring up initContainer "velero-restic-restore-helper" to block user's application start up.
+//       The Init Container will repeatly check file within "/restores/[volume name]/.velero/", until a
+//       [restore UID] file exist.
+
 type PodVolumeRestoreAction struct {
 	logger      logrus.FieldLogger
 	client      corev1client.ConfigMapInterface
@@ -79,6 +85,8 @@ func (a *PodVolumeRestoreAction) AppliesTo() (velero.ResourceSelector, error) {
 	}, nil
 }
 
+// zhou: add Init Container "restic-wait" to application pod.
+
 func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
 	a.logger.Info("Executing PodVolumeRestoreAction")
 	defer a.logger.Info("Done executing PodVolumeRestoreAction")
@@ -87,6 +95,8 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), &pod); err != nil {
 		return nil, errors.Wrap(err, "unable to convert pod from runtime.Unstructured")
 	}
+
+	// zhou: why ???
 
 	// At the point when this function is called, the namespace mapping for the restore
 	// has not yet been applied to `input.Item` so we can't perform a reverse-lookup in
@@ -107,10 +117,14 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 		return nil, errors.WithStack(err)
 	}
 
+	// zhou: convert "[]PodVolumeBackup" to "[]*PodVolumeBackup"
 	var podVolumeBackups []*velerov1api.PodVolumeBackup
 	for i := range podVolumeBackupList.Items {
 		podVolumeBackups = append(podVolumeBackups, &podVolumeBackupList.Items[i])
 	}
+
+	// zhou: Maybe more than one volume within a pod and maybe more than one pod within a Backup.
+
 	volumeSnapshots := podvolume.GetVolumeBackupsForPod(podVolumeBackups, &pod, podFromBackup.Namespace)
 	if len(volumeSnapshots) == 0 {
 		log.Debug("No pod volume backups found for pod")
@@ -127,9 +141,13 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 		return nil, err
 	}
 
+	// zhou: get customized restic-restore-helper image.
+
 	image := getImage(log, config, a.veleroImage)
 	log.Infof("Using image %q", image)
 
+	// zhou: get customized resource setting for Init Container.
+	//       QoS: Guaranteed (not Burstable and BestEffort)
 	cpuRequest, memRequest := getResourceRequests(log, config)
 	cpuLimit, memLimit := getResourceLimits(log, config)
 	if cpuRequest == "" {
@@ -145,6 +163,7 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 		memLimit = defaultMemRequestLimit
 	}
 
+	// zhou: fill "corev1.ResourceRequirements"
 	resourceReqs, err := kube.ParseResourceRequirements(cpuRequest, memRequest, cpuLimit, memLimit)
 	if err != nil {
 		log.Errorf("couldn't parse resource requirements: %s.", err)
@@ -160,6 +179,7 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 	securityContextSet := false
 	// Use securityContext settings from configmap if available
 	if runAsUser != "" || runAsGroup != "" || allowPrivilegeEscalation != "" || secCtx != "" {
+		// zhou: fill "corev1.SecurityContext"
 		securityContext, err = kube.ParseSecurityContext(runAsUser, runAsGroup, allowPrivilegeEscalation, secCtx)
 		if err != nil {
 			log.Errorf("Using default securityContext values, couldn't parse securityContext requirements: %s.", err)
@@ -176,10 +196,14 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 		securityContext = defaultSecurityCtx()
 	}
 
+	// zhou: image, argument, resource, securityContext.
+
 	initContainerBuilder := newRestoreInitContainerBuilder(image, string(input.Restore.UID))
 	initContainerBuilder.Resources(&resourceReqs)
 	initContainerBuilder.SecurityContext(&securityContext)
 
+	// zhou: "/restore/[volume name]/.velero/[restore uid]", only one Init Container handle
+	//       all volumes.
 	for volumeName := range volumeSnapshots {
 		mount := &corev1.VolumeMount{
 			Name:      volumeName,
@@ -190,20 +214,28 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 	initContainerBuilder.Command(getCommand(log, config))
 
 	initContainer := *initContainerBuilder.Result()
+
+	// zhou: set this "restic-wait" Init Container as the first one, since init container are
+	//       executed one by one.
+
 	if len(pod.Spec.InitContainers) == 0 || (pod.Spec.InitContainers[0].Name != restorehelper.WaitInitContainer && pod.Spec.InitContainers[0].Name != restorehelper.WaitInitContainerLegacy) {
 		pod.Spec.InitContainers = append([]corev1.Container{initContainer}, pod.Spec.InitContainers...)
 	} else {
 		pod.Spec.InitContainers[0] = initContainer
 	}
 
+	// zhou: convert to unstructured
 	res, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pod)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to convert pod to runtime.Unstructured")
 	}
 
+	// zhou: it will override "RestoreItemActionExecuteInput.Item"
+
 	return velero.NewRestoreItemActionExecuteOutput(&unstructured.Unstructured{Object: res}), nil
 }
 
+// zhou: binary name.
 func getCommand(log logrus.FieldLogger, config *corev1.ConfigMap) []string {
 	if config == nil {
 		log.Debug("No config found for plugin")
@@ -218,6 +250,8 @@ func getCommand(log logrus.FieldLogger, config *corev1.ConfigMap) []string {
 	log.Debugf("Using custom command %s", config.Data["command"])
 	return []string{config.Data["command"]}
 }
+
+// zhou: get customized restic-restore-helper image url, if not return default
 
 func getImage(log logrus.FieldLogger, config *corev1.ConfigMap, defaultImage string) string {
 	if config == nil {
@@ -235,6 +269,7 @@ func getImage(log logrus.FieldLogger, config *corev1.ConfigMap, defaultImage str
 
 	parts := strings.Split(image, "/")
 
+	// zhou: format error
 	if len(parts) == 1 {
 		// Image supplied without registry part
 		log.Infof("Plugin config contains image name without registry name. Using default init container image: %q", defaultImage)

@@ -50,6 +50,9 @@ func WithLabels(vals ...string) func(obj metav1.Object) {
 	}
 }
 
+// zhou: a good example to use lamda function.
+//       Used to merge target "obj.meta.labels" with this "labels"
+
 // WithLabelsMap is a functional option that applies the specified labels map to
 // an object.
 func WithLabelsMap(labels map[string]string) func(obj metav1.Object) {

@@ -40,6 +40,9 @@ site/public
 site/resources
 site/.hugo_build.lock
 
+cscope.files
+cscope.out
+
 .vs
 
 # these are files for local Tilt development:

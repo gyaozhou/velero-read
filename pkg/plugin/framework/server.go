@@ -31,6 +31,8 @@ import (
 	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/framework/restoreitemaction/v2"
 )
 
+// zhou: used by vendor's plugin implementations.
+
 // Server serves registered plugin implementations.
 type Server interface {
 	// BindFlags defines the plugin server's command-line flags
@@ -57,6 +59,10 @@ type Server interface {
 
 	// RegisterBackupItemActionsV2 registers multiple v2 backup item actions.
 	RegisterBackupItemActionsV2(map[string]common.HandlerInitializer) Server
+
+	// zhou: "Volume Snapshotter - creates volume snapshots (during backup) and
+	//        restores volumes from snapshots (during restore) VolumeSnapshotters are deprecated
+	//        and will be replaced with ItemSnapshotter/Astrolabe plugins."
 
 	// RegisterVolumeSnapshotter registers a volume snapshotter. Accepted format
 	// for the plugin name is <DNS subdomain>/<non-empty name>.
@@ -119,6 +125,10 @@ type server struct {
 	itemBlockAction     *ibav1.ItemBlockActionPlugin
 }
 
+// zhou: builder pattern.
+//       Used by plugin implementation, e.g. velero-plugin-for-csi/main.go, to setup a rpc server.
+//       Then, all following operations will go through rpc methods.
+
 // NewServer returns a new Server
 func NewServer() Server {
 	log := newLogger()
@@ -148,6 +158,8 @@ func (s *server) GetConfig() *config.Config {
 	return s.config
 }
 
+// zhou: need to handle backup action.
+
 func (s *server) RegisterBackupItemAction(name string, initializer common.HandlerInitializer) Server {
 	s.backupItemAction.Register(name, initializer)
 	return s
@@ -172,6 +184,8 @@ func (s *server) RegisterBackupItemActionsV2(m map[string]common.HandlerInitiali
 	return s
 }
 
+// zhou: provide cloud volume snapshotter, e.g. aws EBS -> S3
+
 func (s *server) RegisterVolumeSnapshotter(name string, initializer common.HandlerInitializer) Server {
 	s.volumeSnapshotter.Register(name, initializer)
 	return s
@@ -184,6 +198,7 @@ func (s *server) RegisterVolumeSnapshotters(m map[string]common.HandlerInitializ
 	return s
 }
 
+// zhou: provide object store, e.g. aws s3.
 func (s *server) RegisterObjectStore(name string, initializer common.HandlerInitializer) Server {
 	s.objectStore.Register(name, initializer)
 	return s
@@ -196,6 +211,7 @@ func (s *server) RegisterObjectStores(m map[string]common.HandlerInitializer) Se
 	return s
 }
 
+// zhou: need to handle "Restore" action.
 func (s *server) RegisterRestoreItemAction(name string, initializer common.HandlerInitializer) Server {
 	s.restoreItemAction.Register(name, initializer)
 	return s
@@ -219,6 +235,8 @@ func (s *server) RegisterRestoreItemActionsV2(m map[string]common.HandlerInitial
 	}
 	return s
 }
+
+// zhou: need to handle "BackupDeleteRequest" action.
 
 func (s *server) RegisterDeleteItemAction(name string, initializer common.HandlerInitializer) Server {
 	s.deleteItemAction.Register(name, initializer)
@@ -256,6 +274,7 @@ func getNames(command string, kind common.PluginKind, plugin Interface) []Plugin
 	return pluginIdentifiers
 }
 
+// zhou: README, used by plugin working as RPC server.
 func (s *server) Serve() {
 	if s.flagSet != nil && !s.flagSet.Parsed() {
 		s.log.Debugf("Parsing flags")
@@ -270,6 +289,12 @@ func (s *server) Serve() {
 
 	command := os.Args[0]
 
+	// zhou: plugin implementation already use "RegisterBackupItemAction(), RegisterRestoreItemAction, ..."
+	//       register many items with name like "velero.io/csi-pvc-backupper",
+	//       "velero.io/csi-volumesnapshot-backupper", ...
+	//       Here we collect them into "PluginIdentifier", used to response to rpc service
+	//       "PluginLister"'s method "ListPlugins()"
+
 	var pluginIdentifiers []PluginIdentifier
 	pluginIdentifiers = append(pluginIdentifiers, getNames(command, common.PluginKindBackupItemAction, s.backupItemAction)...)
 	pluginIdentifiers = append(pluginIdentifiers, getNames(command, common.PluginKindBackupItemActionV2, s.backupItemActionV2)...)
@@ -280,8 +305,10 @@ func (s *server) Serve() {
 	pluginIdentifiers = append(pluginIdentifiers, getNames(command, common.PluginKindDeleteItemAction, s.deleteItemAction)...)
 	pluginIdentifiers = append(pluginIdentifiers, getNames(command, common.PluginKindItemBlockAction, s.itemBlockAction)...)
 
+	// zhou: will implement "PluginKindPluginLister" here.
 	pluginLister := NewPluginLister(pluginIdentifiers...)
 
+	// zhou: go-plugin/server.go
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: Handshake(),
 		Plugins: map[string]plugin.Plugin{

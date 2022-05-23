@@ -18,6 +18,12 @@ package repository
 
 import "sync"
 
+// zhou: used to protect ResticRepository CR.
+//       Because there are may be
+//       1. several ResticRepository controller goroutines to handle CR
+//       2. Timer based "restic prune" in ResticRepository controller is running in isolate goroutine.
+//       3. DeleteBackupRequest will trigger "restic forget" according to a ResticRepository CR
+
 // RepoLocker manages exclusive/non-exclusive locks for
 // operations against backup repositories. The semantics
 // of exclusive/non-exclusive locks are the same as for

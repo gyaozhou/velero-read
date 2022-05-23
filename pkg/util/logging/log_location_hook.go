@@ -28,7 +28,7 @@ const (
 	logSourceField          = "logSource"
 	logSourceSetMarkerField = "@logSourceSetBy"
 	logrusPackage           = "github.com/sirupsen/logrus"
-	veleroPackage           = "github.com/vmware-tanzu/velero/"
+	veleroPackage           = "github.com/vmware-tanzu/velero/" // zhou: used to match file path in log.
 	veleroPackageLen        = len(veleroPackage)
 )
 

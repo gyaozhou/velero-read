@@ -84,6 +84,7 @@ type templateData struct {
 	RawCRDs  []string
 }
 
+// zhou: by this way, pack CRD into velero binary. Then user can only need velero to perform installation.
 func main() {
 	headerBytes, err := os.ReadFile(goHeaderFile)
 	if err != nil {

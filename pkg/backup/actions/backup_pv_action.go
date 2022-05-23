@@ -30,6 +30,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/actionhelpers"
 )
 
+// zhou: internal plugin, handle {BackupItemAction, "velero.io/pv"}
+
 // PVCAction inspects a PersistentVolumeClaim for the PersistentVolume
 // that it references and backs it up
 type PVCAction struct {
@@ -45,6 +47,8 @@ func (a *PVCAction) AppliesTo() (velero.ResourceSelector, error) {
 		IncludedResources: []string{"persistentvolumeclaims"},
 	}, nil
 }
+
+// zhou: because backup PVC is useless, so backup corresponding PV.
 
 // Execute finds the PersistentVolume bound by the provided
 // PersistentVolumeClaim, if any, and backs it up

@@ -26,6 +26,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/role-bindings"}
+
 // RoleBindingAction handle namespace remappings for role bindings
 type RoleBindingAction struct {
 	logger logrus.FieldLogger

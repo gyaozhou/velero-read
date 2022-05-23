@@ -42,6 +42,8 @@ func newTypeInfo(pluralName string, itemType, itemListType runtime.Object) typeI
 	}
 }
 
+// zhou: all velero CRD
+
 // CustomResources returns a map of all custom resources within the Velero
 // API group, keyed on Kind.
 func CustomResources() map[string]typeInfo {

@@ -31,10 +31,12 @@ import (
 
 const (
 	credentialsSecretName = "velero-repo-credentials"
-	credentialsKey        = "repository-password"
-
-	encryptionKey = "static-passw0rd"
+	credentialsKey        = "repository-password" // zhou: secret object key
+	encryptionKey         = "static-passw0rd"     // zhou: secret object value
 )
+
+// zhou: check whether there is Secret "velero-restic-credentials" already exist.
+//       If not, create a default one when initing restic repo.
 
 func EnsureCommonRepositoryKey(secretClient corev1client.SecretsGetter, namespace string) error {
 	_, err := secretClient.Secrets(namespace).Get(context.TODO(), credentialsSecretName, metav1.GetOptions{})
@@ -42,6 +44,7 @@ func EnsureCommonRepositoryKey(secretClient corev1client.SecretsGetter, namespac
 		return errors.WithStack(err)
 	}
 	if err == nil {
+		// zhou: why not checkout the secret content, whether includes key "repository-password" ?
 		return nil
 	}
 
@@ -49,6 +52,7 @@ func EnsureCommonRepositoryKey(secretClient corev1client.SecretsGetter, namespac
 
 	secret := &corev1api.Secret{
 		ObjectMeta: metav1.ObjectMeta{
+			// zhou: for each namespace,
 			Namespace: namespace,
 			Name:      credentialsSecretName,
 		},
@@ -64,6 +68,8 @@ func EnsureCommonRepositoryKey(secretClient corev1client.SecretsGetter, namespac
 
 	return nil
 }
+
+// zhou: find the Secret which preserve the Restic Repo password-file.
 
 // RepoKeySelector returns the SecretKeySelector which can be used to fetch
 // the backup repository key.
