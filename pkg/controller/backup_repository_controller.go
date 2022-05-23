@@ -159,6 +159,12 @@ func (r *BackupRepoReconciler) needInvalidBackupRepo(oldObj client.Object, newOb
 	return false
 }
 
+// zhou: Reconcile(), represents/manages the lifecycle of Velero restic repositories.
+//       Velero creates a restic repository per namespace when the first restic backup for a
+//       namespace is requested.
+//       Different restic repository for each namespace, is used to divide the whole restic file
+//       repo into small ones.
+
 func (r *BackupRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.logger.WithField("backupRepo", req.String())
 	backupRepo := &velerov1api.BackupRepository{}
@@ -169,6 +175,7 @@ func (r *BackupRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		log.WithError(err).Error("error getting backup repository")
 		return ctrl.Result{}, err
+
 	}
 
 	if backupRepo.Status.Phase == "" || backupRepo.Status.Phase == velerov1api.BackupRepositoryPhaseNew {
@@ -204,6 +211,9 @@ func (r *BackupRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
+// zhou: TBD, handle a new ResticRepository CR. Create/Init restic repo if the BSL is accesible and
+//       the repo is not created before.
+
 func (r *BackupRepoReconciler) getIdentiferByBSL(ctx context.Context, req *velerov1api.BackupRepository) (string, error) {
 	loc := &velerov1api.BackupStorageLocation{}
 
@@ -214,7 +224,11 @@ func (r *BackupRepoReconciler) getIdentiferByBSL(ctx context.Context, req *veler
 		return "", errors.Wrapf(err, "error to get BSL %s", req.Spec.BackupStorageLocation)
 	}
 
+	// zhou: get the repo name url.
+	//       e.g. "s3-[region name].amazonaws.com:[bsl.spec.objectStorage.bucket]/[bsl.spec.objectStorage.prefix]/restic/[namespace]"
+
 	repoIdentifier, err := repoconfig.GetRepoIdentifier(loc, req.Spec.VolumeNamespace)
+
 	if err != nil {
 		return "", errors.Wrapf(err, "error to get identifier for repo %s", req.Name)
 	}
@@ -238,6 +252,8 @@ func (r *BackupRepoReconciler) initializeRepo(ctx context.Context, req *velerov1
 		})
 	}
 
+	// zhou: set the default maintenance frequency
+
 	// defaulting - if the patch fails, return an error so the item is returned to the queue
 	if err := r.patchBackupRepository(ctx, req, func(rr *velerov1api.BackupRepository) {
 		rr.Spec.ResticIdentifier = repoIdentifier
@@ -252,6 +268,8 @@ func (r *BackupRepoReconciler) initializeRepo(ctx context.Context, req *velerov1
 	if err := ensureRepo(req, r.repositoryManager); err != nil {
 		return r.patchBackupRepository(ctx, req, repoNotReady(err.Error()))
 	}
+
+	// zhou: update status as ready.
 
 	return r.patchBackupRepository(ctx, req, func(rr *velerov1api.BackupRepository) {
 		rr.Status.Phase = velerov1api.BackupRepositoryPhaseReady
@@ -282,9 +300,12 @@ func ensureRepo(repo *velerov1api.BackupRepository, repoManager repository.Manag
 	return repoManager.PrepareRepo(repo)
 }
 
+// zhou: maintenace CR in "ResticRepositoryPhaseReady".
+
 func (r *BackupRepoReconciler) runMaintenanceIfDue(ctx context.Context, req *velerov1api.BackupRepository, log logrus.FieldLogger) error {
 	now := r.clock.Now()
 
+	// zhou: check whether maintenance period is expired.
 	if !dueForMaintenance(req, now) {
 		log.Debug("not due for maintenance")
 		return nil
@@ -309,9 +330,15 @@ func (r *BackupRepoReconciler) runMaintenanceIfDue(ctx context.Context, req *vel
 	})
 }
 
+// zhou: check every 5 mins, and the default maintenance frequency is 7 days.
+//       So in most of time, there is no need perform action for "ResticRepositoryPhaseReady" CR.
+
 func dueForMaintenance(req *velerov1api.BackupRepository, now time.Time) bool {
 	return req.Status.LastMaintenanceTime == nil || req.Status.LastMaintenanceTime.Add(req.Spec.MaintenanceFrequency.Duration).Before(now)
 }
+
+// zhou: maintenace CR in "ResticRepositoryPhaseNotReady".
+//       Try to connect and init if needed. So success, change it to "ResticRepositoryPhaseReady"
 
 func (r *BackupRepoReconciler) checkNotReadyRepo(ctx context.Context, req *velerov1api.BackupRepository, log logrus.FieldLogger) (bool, error) {
 	log.Info("Checking backup repository for readiness")

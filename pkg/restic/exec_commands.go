@@ -69,6 +69,8 @@ func GetSnapshotID(snapshotIDCmd *Command) (string, error) {
 	return snapshots[0].ShortID, nil
 }
 
+// zhou: block to complete "restic backup"
+
 // RunBackup runs a `restic backup` command and watches the output to provide
 // progress updates to the caller.
 func RunBackup(backupCmd *Command, log logrus.FieldLogger, updater uploader.ProgressUpdater) (string, string, error) {
@@ -80,10 +82,14 @@ func RunBackup(backupCmd *Command, log logrus.FieldLogger, updater uploader.Prog
 	// updates
 	quit := make(chan struct{})
 
+	// zhou: using "CommandContext()" instead which could handle ctx timeout,
+	//       then process could be killed automatically.
 	cmd := backupCmd.Cmd()
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
 
+	// zhou: TODO, add cmd.ctx, cancelFunc = context.WithTimeout()
+	//       "restic backup" executed in another process. Start but not wait.
 	err := cmd.Start()
 	if err != nil {
 		exec.LogErrorAsExitCode(err, log)
@@ -95,6 +101,9 @@ func RunBackup(backupCmd *Command, log logrus.FieldLogger, updater uploader.Prog
 		for {
 			select {
 			case <-ticker.C:
+
+				// zhou: TODO, add abort checking here cancelFunc()?
+
 				lastLine := getLastLine(stdoutBuf.Bytes())
 				if len(lastLine) > 0 {
 					stat, err := decodeBackupStatusLine(lastLine)
@@ -118,6 +127,7 @@ func RunBackup(backupCmd *Command, log logrus.FieldLogger, updater uploader.Prog
 		}
 	}()
 
+	// zhou: block for completion.
 	err = cmd.Wait()
 	if err != nil {
 		exec.LogErrorAsExitCode(err, log)
@@ -231,6 +241,8 @@ func RunRestore(restoreCmd *Command, log logrus.FieldLogger, updater uploader.Pr
 		}
 	}()
 
+	// zhou: "restic restore", start and wait.
+
 	stdout, stderr, err := exec.RunCommandWithLog(restoreCmd.Cmd(), log)
 	quit <- struct{}{}
 
@@ -243,7 +255,10 @@ func RunRestore(restoreCmd *Command, log logrus.FieldLogger, updater uploader.Pr
 	return stdout, stderr, err
 }
 
+// zhou: get backup(snapshot) size.
+
 func getSnapshotSize(repoIdentifier, passwordFile, caCertFile, snapshotID string, env []string, insecureTLS string) (int64, error) {
+	// zhou: restic stats xxx
 	cmd := StatsCommand(repoIdentifier, passwordFile, snapshotID)
 	cmd.Env = env
 	cmd.CACertFile = caCertFile
@@ -268,6 +283,7 @@ func getSnapshotSize(repoIdentifier, passwordFile, caCertFile, snapshotID string
 	return snapshotStats.TotalSize, nil
 }
 
+// zhou: iteration way to get directory size, there is should be more efficient way.
 func getVolumeSize(path string) (int64, error) {
 	var size int64
 

@@ -34,6 +34,8 @@ import (
 
 const annotationLastAppliedConfig = "kubectl.kubernetes.io/last-applied-configuration"
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/service"}
+
 type ServiceAction struct {
 	log logrus.FieldLogger
 }

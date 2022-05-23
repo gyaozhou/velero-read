@@ -60,6 +60,12 @@ const (
 	vsphereBIAPluginName = "velero.io/vsphere-pvc-backupper"
 )
 
+// zhou: TBD: similar to "BackupItemActionResolver" which help to "AppliesTo()",
+//       "itemBackupper" helps not only to "Execute()" over each BackupItemActions plugins,
+//       but also perform restic/hook/snapshot/plugins related processing.
+//
+//       Why not implement a function like "NewBackupItemActionResolver()" ???
+
 // itemBackupper can back up individual items to a tar writer.
 type itemBackupper struct {
 	backupRequest            *Request
@@ -71,6 +77,20 @@ type itemBackupper struct {
 	podVolumeSnapshotTracker *pvcSnapshotTracker
 	volumeSnapshotterGetter  VolumeSnapshotterGetter
 
+	// zhou: used to handle volume backup via restic
+
+	resticBackupper podvolume.Backupper
+
+	// zhou: when handle Pod object, we will check any volume need backup, if the volume is PVC,
+	//       then we will back it up.
+	//       In another hand, when handle PVC object, we also will back it up.
+	//       So the volume may be backed up twice. To avoid it, need to a tracker to manage it.
+
+	resticSnapshotTracker *pvcSnapshotTracker
+
+	// zhou: used to get the plugin handler by volume corresponding VSL name.
+
+	volumeSnapshotterGetter            VolumeSnapshotterGetter
 	itemHookHandler                    hook.ItemHookHandler
 	snapshotLocationVolumeSnapshotters map[string]vsv1.VolumeSnapshotter
 	hookTracker                        *hook.HookTracker
@@ -81,6 +101,12 @@ type FileForArchive struct {
 	Header    *tar.Header
 	FileBytes []byte
 }
+
+// zhou: handle the object matching Backup CR described, checking whether meet criteria from:
+//       1. plugin's AppliesTo().
+//       2. hooks's spec.
+//       3. VSL
+//       4. restic to backup volume.
 
 // backupItem backs up an individual item to tarWriter. The item may be excluded based on the
 // namespaces IncludesExcludes list.
@@ -107,6 +133,8 @@ func (ib *itemBackupper) backupItem(logger logrus.FieldLogger, obj runtime.Unstr
 
 func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runtime.Unstructured, groupResource schema.GroupResource, preferredGVR schema.GroupVersionResource, mustInclude, finalize bool) (bool, []FileForArchive, error) {
 	var itemFiles []FileForArchive
+	// zhou: access object's metadata !!!
+
 	metadata, err := meta.Accessor(obj)
 	if err != nil {
 		return false, itemFiles, err
@@ -135,6 +163,9 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 			log.Info("Excluding item because namespace is excluded")
 			return false, itemFiles, nil
 		}
+
+		// zhou: TBD, TESTME, In "itemCollector.getResourceItems()", may slip out some excludedNamespace.
+		//       Checking here is necessary.
 
 		// NOTE: we specifically allow namespaces to be backed up even if it's excluded.
 		// This check is more permissive for cluster resources to let those passed in by
@@ -165,11 +196,16 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 		name:      name,
 	}
 
+	// zhou: already backed up in previous actions.
+
 	if _, exists := ib.backupRequest.BackedUpItems[key]; exists {
 		log.Info("Skipping item because it's already been backed up.")
 		// returning true since this item *is* in the backup, even though we're not backing it up here
 		return true, itemFiles, nil
 	}
+
+	// zhou: why set it as backed up so earlier.
+
 	ib.backupRequest.BackedUpItems[key] = struct{}{}
 	log.Info("Backing up item")
 
@@ -179,6 +215,8 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 		pvbVolumes []string
 	)
 
+	// zhou: Pre hook related processing
+
 	log.Debug("Executing pre hooks")
 	if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePre, ib.hookTracker); err != nil {
 		return false, itemFiles, err
@@ -186,6 +224,8 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 	if optedOut, podName := ib.podVolumeSnapshotTracker.OptedoutByPod(namespace, name); optedOut {
 		ib.trackSkippedPV(obj, groupResource, podVolumeApproach, fmt.Sprintf("opted out due to annotation in pod %s", podName), log)
 	}
+
+	// zhou: that's why we "sortCoreGroup()", handle pod firstly for restic.
 
 	if groupResource == kuberesource.Pods {
 		// pod needs to be initialized for the unstructured converter
@@ -195,6 +235,11 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 			// nil it on error since it's not valid
 			pod = nil
 		} else {
+
+			// zhou: good point, exclude RWX volume.
+			//       How to avoid duplicate with CSI snapshot and VolumeSnapshotter ???
+			//       They are two isolate processing.
+
 			// Get the list of volumes to back up using pod volume backup from the pod's annotations. Remove from this list
 			// any volumes that use a PVC that we've already backed up (this would be in a read-write-many scenario,
 			// where it's been backed up from another pod), since we don't need >1 backup per PVC.
@@ -205,6 +250,10 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 			)
 
 			for _, volume := range includedVolumes {
+
+				// zhou: TBD, if this volume is backing with PVC and already handled, ignore it.
+				//       Otherwise, if it is local volume or not be handled, append to pending list.
+
 				// track the volumes that are PVCs using the PVC snapshot tracker, so that when we backup PVCs/PVs
 				// via an item action in the next step, we don't snapshot PVs that will have their data backed up
 				// with pod volume backup.
@@ -217,6 +266,9 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 					}).Info("Pod volume uses a persistent volume claim which has already been backed up from another pod, skipping.")
 					continue
 				}
+
+				// zhou: TBD, append this volume to pending list if it is backing with PVC.
+
 				pvbVolumes = append(pvbVolumes, volume)
 			}
 			for _, optedOutVol := range optedOutVolumes {
@@ -229,9 +281,15 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 	// the group version of the object.
 	versionPath := resourceVersion(obj)
 
+	// zhou: TBD, rpc "PluginKindBackupItemAction" Execute(). The original object may be modified.
+	//       And there are maybe addtional items need to be backup. It will recursive inoke
+	//       backupItem().
+
 	updatedObj, additionalItemFiles, err := ib.executeActions(log, obj, groupResource, name, namespace, metadata, finalize)
 	if err != nil {
 		backupErrs = append(backupErrs, err)
+
+		// zhou: post hook processing if case of return in error case
 
 		// if there was an error running actions, execute post hooks and return
 		log.Debug("Executing post hooks")
@@ -250,6 +308,8 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 	name = metadata.GetName()
 	namespace = metadata.GetNamespace()
 
+	// zhou: if it is a PV, not processed by restic
+
 	if groupResource == kuberesource.PersistentVolumes {
 		if err := ib.addVolumeInfo(obj, log); err != nil {
 			backupErrs = append(backupErrs, err)
@@ -260,7 +320,14 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 		}
 	}
 
+	// zhou: Once a pv was backed up by restic, it will never be handled by CSI plugin or
+	//       cloud VolumeSnapshot plugin.
+
+	// zhou: pod related volumes restic processing
 	if groupResource == kuberesource.Pods && pod != nil {
+
+		// zhou: let restic manager to trigger restic to move data
+
 		// this function will return partial results, so process podVolumeBackups
 		// even if there are errors.
 		podVolumeBackups, podVolumePVCBackupSummary, errs := ib.backupPodVolumes(log, pod, pvbVolumes)
@@ -292,6 +359,8 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 		}
 	}
 
+	// zhou: post hook processing
+
 	log.Debug("Executing post hooks")
 	if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePost, ib.hookTracker); err != nil {
 		backupErrs = append(backupErrs, err)
@@ -319,6 +388,9 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 
 func getFileForArchive(namespace, name, groupResource, versionPath string, itemBytes []byte) FileForArchive {
 	filePath := archive.GetVersionedItemFilePath("", groupResource, namespace, name, versionPath)
+
+	// zhou: write file "filePath" into tarball file "[backup name].tar.gz"
+
 	hdr := &tar.Header{
 		Name:     filePath,
 		Size:     int64(len(itemBytes)),
@@ -341,8 +413,14 @@ func (ib *itemBackupper) backupPodVolumes(log logrus.FieldLogger, pod *corev1api
 		return nil, nil, nil
 	}
 
+	// zhou: handle over to pkg/restic/backupper.go "backupper.BackupPodVolumes()"
+
 	return ib.podVolumeBackupper.BackupPodVolumes(ib.backupRequest.Backup, pod, volumes, ib.backupRequest.ResPolicies, log)
 }
+
+// zhou: check whether this resource matchs the plugins' resoved actions.
+//       If yes, handle "PluginKindBackupItemAction" Execute().
+//       And if additionalItems is not empty, recursive invoke "backupItem()".
 
 func (ib *itemBackupper) executeActions(
 	log logrus.FieldLogger,
@@ -373,6 +451,8 @@ func (ib *itemBackupper) executeActions(
 				actionName, groupResource.String(), metadata.GetNamespace(), metadata.GetName(), features.Serialize())
 			continue
 		}
+
+		// zhou: rpc "PluginKindBackupItemAction" Execute().
 
 		updatedItem, additionalItemIdentifiers, operationID, postOperationItems, err := action.Execute(obj, ib.backupRequest.Backup)
 		if err != nil {
@@ -423,6 +503,7 @@ func (ib *itemBackupper) executeActions(
 			*itemOperList = append(*itemOperList, &newOperation)
 		}
 
+		// zhou: additional resources need to be backup.
 		for _, additionalItem := range additionalItemIdentifiers {
 			gvr, resource, err := ib.discoveryHelper.ResourceFor(additionalItem.GroupResource.WithVersion(""))
 			if err != nil {
@@ -448,6 +529,8 @@ func (ib *itemBackupper) executeActions(
 				return nil, itemFiles, errors.WithStack(err)
 			}
 
+			// zhou: recursive backup item if plugin need backup more items.
+
 			_, additionalItemFiles, err := ib.backupItem(log, item, gvr.GroupResource(), gvr, mustInclude, finalize)
 			if err != nil {
 				return nil, itemFiles, err
@@ -458,18 +541,26 @@ func (ib *itemBackupper) executeActions(
 	return obj, itemFiles, nil
 }
 
+// zhou: get a "velero.VolumeSnapshotter" (find a plugin which implements the provider),
+//       which is used to handle cloud VolumeSnapshot
+
 // volumeSnapshotter instantiates and initializes a VolumeSnapshotter given a VolumeSnapshotLocation,
 // or returns an existing one if one's already been initialized for the location.
 func (ib *itemBackupper) volumeSnapshotter(snapshotLocation *velerov1api.VolumeSnapshotLocation) (vsv1.VolumeSnapshotter, error) {
+
+	// zhou: checking existing "velero.VolumeSnapshotter"
+
 	if bs, ok := ib.snapshotLocationVolumeSnapshotters[snapshotLocation.Name]; ok {
 		return bs, nil
 	}
 
+	// zhou: if no, get a one by provider
 	bs, err := ib.volumeSnapshotterGetter.GetVolumeSnapshotter(snapshotLocation.Spec.Provider)
 	if err != nil {
 		return nil, err
 	}
 
+	// zhou: init "velero.VolumeSnapshotter"
 	if err := bs.Init(snapshotLocation.Spec.Config); err != nil {
 		return nil, err
 	}
@@ -501,12 +592,17 @@ const (
 	manilaCsiZoneKey = "topology.cinder.csi.openstack.org/zone"
 )
 
+// zhou: if cloud VolmeSnapshot enabled, and this PV has not been backed up by restic,
+//       here will try to take cloud snapshot via plugin.
+//       Note, need PV corresponding provider's VSL defined, and plugin installed.
+
 // takePVSnapshot triggers a snapshot for the volume/disk underlying a PersistentVolume if the provided
 // backup has volume snapshots enabled and the PV is of a compatible type. Also records cloud
 // disk type and IOPS (if applicable) to be able to restore to current state later.
 func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.FieldLogger) error {
 	log.Info("Executing takePVSnapshot")
 
+	// zhou: cloud VolumeSnapshot disabled.
 	if boolptr.IsSetToFalse(ib.backupRequest.Spec.SnapshotVolumes) {
 		log.Info("Backup has volume snapshots disabled; skipping volume snapshot action.")
 		ib.trackSkippedPV(obj, kuberesource.PersistentVolumes, volumeSnapshotApproach, "backup has volume snapshots disabled", log)
@@ -519,6 +615,8 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 	}
 
 	log = log.WithField("persistentVolume", pv.Name)
+
+	// zhou: because velero always handle pod firstly, then pod related volumes coule be handled.
 
 	// If this PV is claimed, see if we've already taken a (pod volume backup) snapshot of the contents
 	// of this PV. If so, don't take a snapshot.
@@ -577,19 +675,28 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 		}
 	}
 
+	////////////////////////////////////////////////////////////////////////////////
+	// zhou: preparing cloud VolumeSnapshot
+
 	var (
 		volumeID, location string
 		volumeSnapshotter  vsv1.VolumeSnapshotter
 	)
 
+	// zhou: checking VSL
+
 	for _, snapshotLocation := range ib.backupRequest.SnapshotLocations {
 		log := log.WithField("volumeSnapshotLocation", snapshotLocation.Name)
+
+		// zhou: get the plugin which implements the provider.
 
 		bs, err := ib.volumeSnapshotter(snapshotLocation)
 		if err != nil {
 			log.WithError(err).Error("Error getting volume snapshotter for volume snapshot location")
 			continue
 		}
+
+		// zhou: get volume's aws internal id.
 
 		if volumeID, err = bs.GetVolumeID(obj); err != nil {
 			log.WithError(err).Errorf("Error attempting to get volume ID for persistent volume")
@@ -606,12 +713,16 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 		break
 	}
 
+	// zhou:
+
 	if volumeSnapshotter == nil {
 		// the PV may still has change to be snapshotted by CSI plugin's `PVCBackupItemAction` in PVC backup logic
 		log.Info("Persistent volume is not a supported volume type for Velero-native volumeSnapshotter snapshot, skipping.")
 		ib.backupRequest.SkippedPVTracker.Track(pv.Name, volumeSnapshotApproach, "no applicable volumesnapshotter found")
 		return nil
 	}
+
+	// zhou: taking cloud VolumeSnapshot
 
 	log = log.WithField("volumeID", volumeID)
 
@@ -632,6 +743,7 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 	log.Info("Snapshotting persistent volume")
 	snapshot := volumeSnapshot(ib.backupRequest.Backup, pv.Name, volumeID, volumeType, pvFailureDomainZone, location, iops)
 
+	// zhou: rpc plugin's method "CreateSnapshot()"
 	var errs []error
 	ib.backupRequest.SkippedPVTracker.Untrack(pv.Name)
 	snapshotID, err := volumeSnapshotter.CreateSnapshot(snapshot.Spec.ProviderVolumeID, snapshot.Spec.VolumeAZ, tags)
@@ -731,6 +843,8 @@ func getPVName(obj runtime.Unstructured, groupResource schema.GroupResource) (st
 	}
 	return "", nil
 }
+
+// zhou: prepare for cloud VolumeSnapshot plugin.
 
 func volumeSnapshot(backup *velerov1api.Backup, volumeName, volumeID, volumeType, az, location string, iops *int64) *volume.Snapshot {
 	return &volume.Snapshot{

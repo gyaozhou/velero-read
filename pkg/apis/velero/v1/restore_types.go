@@ -29,6 +29,10 @@ type RestoreSpec struct {
 	// +optional
 	BackupName string `json:"backupName,omitempty"`
 
+	// zhou: if admin want to restore the latest backup of this Schedule,
+	//       specify this field.
+	//       Otherwise, use BackupName specify the dedicated one.
+
 	// ScheduleName is the unique name of the Velero schedule to restore
 	// from. If specified, and BackupName is empty, Velero will restore
 	// from the most recent successful backup created from this schedule.
@@ -82,6 +86,8 @@ type RestoreSpec struct {
 	// +nullable
 	OrLabelSelectors []*metav1.LabelSelector `json:"orLabelSelectors,omitempty"`
 
+	// zhou: similar with backup.spec.SnapshotVolumes.
+
 	// RestorePVs specifies whether to restore all included
 	// PVs from snapshot
 	// +optional
@@ -98,6 +104,8 @@ type RestoreSpec struct {
 	// +optional
 	// +nullable
 	PreserveNodePorts *bool `json:"preserveNodePorts,omitempty"`
+
+	// zhou: if false, do NOT restore cluster scope resources.
 
 	// IncludeClusterResources specifies whether cluster-scoped resources
 	// should be included for consideration in the restore. If null, defaults

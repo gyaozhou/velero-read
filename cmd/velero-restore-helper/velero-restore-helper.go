@@ -23,12 +23,15 @@ import (
 	"time"
 )
 
+// zhou: this image will be bring up as init container in application pod when performing restore.
+
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Fprintln(os.Stderr, "ERROR: exactly one argument must be provided, the restore's UID")
 		os.Exit(1)
 	}
 
+	// zhou: execute "done()" every 1s
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -47,6 +50,8 @@ func main() {
 	}
 }
 
+// zhou: "/restore/[volume name]/.velero/[restore uid]"
+
 // done returns true if for each directory under /restores, a file exists
 // within the .velero/ subdirectory whose name is equal to os.Args[1], or
 // false otherwise
@@ -56,13 +61,15 @@ func done() bool {
 		fmt.Fprintf(os.Stderr, "ERROR reading /restores directory: %s\n", err)
 		return false
 	}
-
+	// zhou: There might be several volumes of pod, should check each depth==1 sub-dir of "/restore".
 	for _, child := range children {
 		if !child.IsDir() {
 			fmt.Printf("%s is not a directory, skipping.\n", child.Name())
 			continue
 		}
 
+		// zhou: the file will be wrote by PodVolumeRestore controller when it completed
+		//       successfully. The Restore CR uid verification is important.
 		doneFile := filepath.Join("/restores", child.Name(), ".velero", os.Args[1])
 
 		if _, err := os.Stat(doneFile); os.IsNotExist(err) {

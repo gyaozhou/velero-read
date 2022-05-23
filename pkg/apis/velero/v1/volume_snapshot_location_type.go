@@ -28,6 +28,8 @@ import (
 // +kubebuilder:object:generate=true
 // +kubebuilder:storageversion
 
+// zhou:
+
 // VolumeSnapshotLocation is a location where Velero stores volume snapshots.
 type VolumeSnapshotLocation struct {
 	metav1.TypeMeta `json:",inline"`
@@ -55,6 +57,8 @@ type VolumeSnapshotLocationList struct {
 
 	Items []VolumeSnapshotLocation `json:"items"`
 }
+
+// zhou: quite similar with BSL, which is unique according to provider.
 
 // VolumeSnapshotLocationSpec defines the specification for a Velero VolumeSnapshotLocation.
 type VolumeSnapshotLocationSpec struct {

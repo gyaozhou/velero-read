@@ -23,11 +23,11 @@ const (
 	BackupFinalizer       = "backup-finalizer"
 	BackupRepo            = "backup-repo"
 	BackupStorageLocation = "backup-storage-location"
-	BackupSync            = "backup-sync"
+	BackupSync            = "backup-sync" // zhou: could not be disabled
 	DownloadRequest       = "download-request"
 	GarbageCollection     = "gc"
-	PodVolumeBackup       = "pod-volume-backup"
-	PodVolumeRestore      = "pod-volume-restore"
+	PodVolumeBackup       = "pod-volume-backup"  // zhou: could not be disabled
+	PodVolumeRestore      = "pod-volume-restore" // zhou: could not be disabled
 	Restore               = "restore"
 	RestoreOperations     = "restore-operations"
 	Schedule              = "schedule"

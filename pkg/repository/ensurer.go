@@ -31,10 +31,17 @@ import (
 	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
 )
 
+// zhou: ResticRepository CR status watcher.
+//       The file is used to make sure that correpsonding restic repo is init.
+//       If not, create ResticRepository CR and wait for its status is updated to completed.
+//       restic repository controller will handle the CR to init restic repo.
+
 // Ensurer ensures that backup repositories are created and ready.
 type Ensurer struct {
 	log        logrus.FieldLogger
 	repoClient client.Client
+
+	// zhou: protect map "repoLocks" itself.
 
 	// repoLocksMu synchronizes reads/writes to the repoLocks map itself
 	// since maps are not threadsafe.
@@ -42,6 +49,8 @@ type Ensurer struct {
 	repoLocks       map[BackupRepositoryKey]*sync.Mutex
 	resourceTimeout time.Duration
 }
+
+// zhou: AddEventHandler() on ResticRepository informer, which means watching it changes.
 
 func NewEnsurer(repoClient client.Client, log logrus.FieldLogger, resourceTimeout time.Duration) *Ensurer {
 	return &Ensurer{
@@ -52,6 +61,11 @@ func NewEnsurer(repoClient client.Client, log logrus.FieldLogger, resourceTimeou
 	}
 }
 
+// zhou: secure the restic repo is init. If not, create a ResticRepository CR and block to wait.
+//       In case of not only performing Backup, but also Restore and DeleteBackupRequest, need to
+//       verify corresponding ResticRepository CR is exist.
+//       Because it might be lose when failed over to another cluster or some other cases.
+
 func (r *Ensurer) EnsureRepo(ctx context.Context, namespace, volumeNamespace, backupLocation, repositoryType string) (*velerov1api.BackupRepository, error) {
 	if volumeNamespace == "" || backupLocation == "" || repositoryType == "" {
 		return nil, errors.Errorf("wrong parameters, namespace %q, backup storage location %q, repository type %q", volumeNamespace, backupLocation, repositoryType)
@@ -60,6 +74,9 @@ func (r *Ensurer) EnsureRepo(ctx context.Context, namespace, volumeNamespace, ba
 	backupRepoKey := BackupRepositoryKey{volumeNamespace, backupLocation, repositoryType}
 
 	log := r.log.WithField("volumeNamespace", volumeNamespace).WithField("backupLocation", backupLocation).WithField("repositoryType", repositoryType)
+
+	// zhou: FIXME, using BSL name as part of the key is not safe enough since one Object Storage
+	//       could be referred by several BSl.
 
 	// It's only safe to have one instance of this method executing concurrently for a
 	// given BackupRepositoryKey, so synchronize based on that. It's fine
@@ -74,6 +91,7 @@ func (r *Ensurer) EnsureRepo(ctx context.Context, namespace, volumeNamespace, ba
 	// GenerateName) which poses a backwards compatibility problem.
 	log.Debug("Acquiring lock")
 
+	// zhou: repositoryEnsurer is shared within velero server.
 	repoMu := r.repoLock(backupRepoKey)
 	repoMu.Lock()
 	defer func() {
@@ -83,6 +101,7 @@ func (r *Ensurer) EnsureRepo(ctx context.Context, namespace, volumeNamespace, ba
 
 	_, err := GetBackupRepository(ctx, r.repoClient, namespace, backupRepoKey, false)
 	if err == nil {
+
 		log.Info("Founding existing repo")
 		return r.waitBackupRepository(ctx, namespace, backupRepoKey)
 	} else if isBackupRepositoryNotFoundError(err) {

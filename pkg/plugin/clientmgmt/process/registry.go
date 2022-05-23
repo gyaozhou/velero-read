@@ -29,8 +29,12 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 )
 
+// zhou: implemented by "registry struct"
+
 // Registry manages information about available plugins.
 type Registry interface {
+	// zhou: used to discover which rpc service the plugin implemented.
+
 	// DiscoverPlugins discovers all available plugins.
 	DiscoverPlugins() error
 	// List returns all PluginIdentifiers for kind.
@@ -51,12 +55,17 @@ type registry struct {
 	dir      string
 	logger   logrus.FieldLogger
 	logLevel logrus.Level
-
+	// zhou: it is the interface to create/init plugin via go-plugin
 	processFactory Factory
-	fs             filesystem.Interface
-	pluginsByID    map[KindAndName]framework.PluginIdentifier
-	pluginsByKind  map[common.PluginKind][]framework.PluginIdentifier
+	// zhou: OS filesystem related operations.
+	fs filesystem.Interface
+	// zhou: {plugin binary name, PluginKind} -> {plugin binary name, PluginKind, registered plugin name}
+	pluginsByID map[KindAndName]framework.PluginIdentifier
+	// zhou: {PluginKind} -> []{plugin binary name, PluginKind, registered plugin name}
+	pluginsByKind map[common.PluginKind][]framework.PluginIdentifier
 }
+
+// zhou: init Plugin Manager, NOT the Plugin clients manager which handled by "Manager interface"
 
 // NewRegistry returns a new registry.
 func NewRegistry(dir string, logger logrus.FieldLogger, logLevel logrus.Level) Registry {
@@ -72,11 +81,17 @@ func NewRegistry(dir string, logger logrus.FieldLogger, logLevel logrus.Level) R
 	}
 }
 
+// zhou: discover plugin implemented "service type", "vendor name" list by invoke rpc lister to
+//
+//	all binary in "plugin-dir".
 func (r *registry) DiscoverPlugins() error {
+	// zhou: get full path of all plugin binary
 	plugins, err := r.readPluginsDir(r.dir)
 	if err != nil {
 		return err
 	}
+
+	// zhou: will be converted to "velero run-plugins" in client_builder.go, for velero buildin plugins.
 
 	// Start by adding velero's internal plugins
 	commands := []string{os.Args[0]}
@@ -86,6 +101,7 @@ func (r *registry) DiscoverPlugins() error {
 	return r.discoverPlugins(commands)
 }
 
+// zhou: go around each plugin binary path to get their registered identifiers.
 func (r *registry) discoverPlugins(commands []string) error {
 	for _, command := range commands {
 		plugins, err := r.listPlugins(command)
@@ -95,9 +111,9 @@ func (r *registry) discoverPlugins(commands []string) error {
 
 		for _, plugin := range plugins {
 			r.logger.WithFields(logrus.Fields{
-				"kind":    plugin.Kind,
-				"name":    plugin.Name,
-				"command": command,
+				"kind":    plugin.Kind, // zhou: "BackupItemAction"
+				"name":    plugin.Name, // zhou: "velero.io/csi-pvc-backupper"
+				"command": command,     // zhou: velero-plugin-for-csi
 			}).Info("registering plugin")
 
 			if err := r.register(plugin); err != nil {
@@ -109,11 +125,15 @@ func (r *registry) discoverPlugins(commands []string) error {
 	return nil
 }
 
+// zhou: get all registered plugins with this PluginKind.
+
 // List returns info about all plugin binaries that implement the given
 // PluginKind.
 func (r *registry) List(kind common.PluginKind) []framework.PluginIdentifier {
 	return r.pluginsByKind[kind]
 }
+
+// zhou: get "PluginIdentifier" by PluginKind and Registered Plugin Name.
 
 // Get returns info about a plugin with the given name and kind, or an
 // error if one cannot be found.
@@ -125,6 +145,8 @@ func (r *registry) Get(kind common.PluginKind, name string) (framework.PluginIde
 	return p, nil
 }
 
+// zhou: used to discovery Plugin binary recursivly.
+
 // readPluginsDir recursively reads dir looking for plugins.
 func (r *registry) readPluginsDir(dir string) ([]string, error) {
 	if _, err := r.fs.Stat(dir); err != nil {
@@ -134,6 +156,7 @@ func (r *registry) readPluginsDir(dir string) ([]string, error) {
 		return nil, errors.WithStack(err)
 	}
 
+	// zhou:
 	files, err := r.fs.ReadDir(dir)
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -151,7 +174,7 @@ func (r *registry) readPluginsDir(dir string) ([]string, error) {
 			fullPaths = append(fullPaths, subDirPaths...)
 			continue
 		}
-
+		// zhou: ignore non-executable plugin binary
 		if !executable(file) {
 			continue
 		}
@@ -175,26 +198,34 @@ func executable(info os.FileInfo) bool {
 	return (info.Mode() & 0111) != 0
 }
 
+// zhou: used to invoke PluginLister.proto, get Plugin identifier for a Plugin implementation.
+
 // listPlugins executes command, queries it for registered plugins, and returns the list of PluginIdentifiers.
 func (r *registry) listPlugins(command string) ([]framework.PluginIdentifier, error) {
+	// zhou: run this plugin in sub-process
 	process, err := r.processFactory.newProcess(command, r.logger, r.logLevel)
 	if err != nil {
 		return nil, err
 	}
+	// zhou: after fetch this plugin's identifier, kill it.
 	defer process.kill()
 
+	// zhou: pkg/plugin/framework/server.go serve() will implement rpc service within plugin.
 	plugin, err := process.dispense(KindAndName{Kind: common.PluginKindPluginLister})
 	if err != nil {
 		return nil, err
 	}
-
+	// zhou: force convert type
 	lister, ok := plugin.(framework.PluginLister)
 	if !ok {
 		return nil, errors.Errorf("%T is not a PluginLister", plugin)
 	}
 
+	// zhou: get this plugin registered actions' name via rpc, e.g. "velero.io/csi-pvc-backupper".
 	return lister.ListPlugins()
 }
+
+// zhou: avoid duplicated pluginidentifer with other plugin implemented.
 
 // register registers a PluginIdentifier with the registry.
 func (r *registry) register(id framework.PluginIdentifier) error {

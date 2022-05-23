@@ -31,6 +31,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: internal plugin, handle {BackupItemAction, "velero.io/service-account"} if installed
+
 // ServiceAccountAction implements ItemAction.
 type ServiceAccountAction struct {
 	log                 logrus.FieldLogger
@@ -69,6 +71,8 @@ func (a *ServiceAccountAction) AppliesTo() (velero.ResourceSelector, error) {
 		IncludedResources: []string{"serviceaccounts"},
 	}, nil
 }
+
+// zhou: README,
 
 // Execute checks for any ClusterRoleBindings that have this service account as a subject, and
 // adds the ClusterRoleBinding and associated ClusterRole to the list of additional items to

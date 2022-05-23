@@ -35,20 +35,24 @@ type itemKey struct {
 	name      string
 }
 
+// zhou: aggregation of backup related data
+
 // Request is a request for a backup, with all references to other objects
 // materialized (e.g. backup/snapshot locations, includes/excludes, etc.)
 type Request struct {
+
+	// zhou: includes a Backup CR
 	*velerov1api.Backup
 
-	StorageLocation           *velerov1api.BackupStorageLocation
-	SnapshotLocations         []*velerov1api.VolumeSnapshotLocation
-	NamespaceIncludesExcludes *collections.IncludesExcludes
-	ResourceIncludesExcludes  collections.IncludesExcludesInterface
-	ResourceHooks             []hook.ResourceHook
-	ResolvedActions           []framework.BackupItemResolvedActionV2
-	VolumeSnapshots           []*volume.Snapshot
-	PodVolumeBackups          []*velerov1api.PodVolumeBackup
-	BackedUpItems             map[itemKey]struct{}
+	StorageLocation           *velerov1api.BackupStorageLocation     // zhou: BSL CR referred
+	SnapshotLocations         []*velerov1api.VolumeSnapshotLocation  // zhou: VSL CR referred
+	NamespaceIncludesExcludes *collections.IncludesExcludes          // zhou: formalized namespace
+	ResourceIncludesExcludes  collections.IncludesExcludesInterface  // zhou: formalized resource GVK
+	ResourceHooks             []hook.ResourceHook                    // zhou: formalized hook handler
+	ResolvedActions           []framework.BackupItemResolvedActionV2 // zhou: PluginKindBackupItemAction interested resource list
+	VolumeSnapshots           []*volume.Snapshot                     // zhou: volume backed up by VSL.
+	PodVolumeBackups          []*velerov1api.PodVolumeBackup         // zhou: volume backed up by restic
+	BackedUpItems             map[itemKey]struct{}                   // zhou: objects have been backed up.
 	itemOperationsList        *[]*itemoperation.BackupOperation
 	ResPolicies               *resourcepolicies.Policies
 	SkippedPVTracker          *skipPVTracker

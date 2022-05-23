@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+// zhou: special resources
 var (
 	ClusterRoleBindings       = schema.GroupResource{Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings"}
 	ClusterRoles              = schema.GroupResource{Group: "rbac.authorization.k8s.io", Resource: "clusterroles"}

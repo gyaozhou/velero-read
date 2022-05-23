@@ -30,6 +30,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 )
 
+// zhou: shared by "velero backup get ..." and "velero get backup ..."
 func NewGetCommand(f client.Factory, use string) *cobra.Command {
 	var listOptions metav1.ListOptions
 

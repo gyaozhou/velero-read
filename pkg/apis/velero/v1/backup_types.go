@@ -101,6 +101,9 @@ type BackupSpec struct {
 	// +nullable
 	OrLabelSelectors []*metav1.LabelSelector `json:"orLabelSelectors,omitempty"`
 
+	// zhou: if SnapshotVolumes !=nil && *SnapshotVolumes == false,
+	//       both cloud VolumeSnapshot and velero-plugin-for-csi will not perform snapshot.
+
 	// SnapshotVolumes specifies whether to take snapshots
 	// of any PV's referenced in the set of objects included
 	// in the Backup.
@@ -113,6 +116,20 @@ type BackupSpec struct {
 	// +optional
 	TTL metav1.Duration `json:"ttl,omitempty"`
 
+	// zhou: https://velero.io/docs/v1.6/api-types/backup/,
+	//       "Whether or not to include cluster-scoped resources. Valid values are true, false, and
+	//        null/unset.
+	//        If true, all cluster-scoped resources are included (subject to included/excluded
+	//        resources and the label selector).
+	//        If false, no cluster-scoped resources are included.
+	//        If unset, all cluster-scoped resources are included if and only if all namespaces are
+	//        included and there are no excluded namespaces. Otherwise, if there is at least one
+	//        namespace specified in either includedNamespaces or excludedNamespaces, then the only
+	//        cluster-scoped resources that are backed up are those associated with namespace-scoped
+	//        resources included in the backup. For example, if a PersistentVolumeClaim is included
+	//        in the backup, its associated PersistentVolume (which is cluster-scoped) would also be
+	//        backed up."
+
 	// IncludeClusterResources specifies whether cluster-scoped resources
 	// should be included for consideration in the backup.
 	// +optional
@@ -123,13 +140,22 @@ type BackupSpec struct {
 	// +optional
 	Hooks BackupHooks `json:"hooks,omitempty"`
 
+	// zhou: only one BSL could be specified within Backup.
+
 	// StorageLocation is a string containing the name of a BackupStorageLocation where the backup should be stored.
 	// +optional
 	StorageLocation string `json:"storageLocation,omitempty"`
 
+	// zhou: due to volumes within a Backup may provided by different volume provider,
+	//       so using differernt VolumeSnapshotLocations.
+
 	// VolumeSnapshotLocations is a list containing names of VolumeSnapshotLocations associated with this backup.
 	// +optional
 	VolumeSnapshotLocations []string `json:"volumeSnapshotLocations,omitempty"`
+
+	// zhou: default is using Restic or NOT.
+	//       If false, user need to set annotation on each volume need to be backed up by restic.
+	//       If yes, user also need to set annotation on each volume NOT be backed up by restic.
 
 	// DefaultVolumesToRestic specifies whether restic should be used to take a
 	// backup of all pod volumes by default.
@@ -139,11 +165,17 @@ type BackupSpec struct {
 	// +nullable
 	DefaultVolumesToRestic *bool `json:"defaultVolumesToRestic,omitempty"`
 
+	// zhou: default is using filesystem copy or NOT, default is false.
+	//       If false, user need to set annotation on each volume need to be backed up by restic/kopia.
+	//       If yes, user also need to set annotation on each volume NOT be backed up by restic/kopia.
+
 	// DefaultVolumesToFsBackup specifies whether pod volume file system backup should be used
 	// for all volumes by default.
 	// +optional
 	// +nullable
 	DefaultVolumesToFsBackup *bool `json:"defaultVolumesToFsBackup,omitempty"`
+
+	// zhou: resources of a kind, need to be backed up in user specific order.
 
 	// OrderedResources specifies the backup order of resources of specific Kind.
 	// The map key is the resource name and value is a list of object names separated by commas.
@@ -203,6 +235,8 @@ type BackupResourceHookSpec struct {
 	// Name is the name of this hook.
 	Name string `json:"name"`
 
+	// zhou: the conditions below should be meet
+
 	// IncludedNamespaces specifies the namespaces to which this hook spec applies. If empty, it applies
 	// to all namespaces.
 	// +optional
@@ -213,6 +247,8 @@ type BackupResourceHookSpec struct {
 	// +optional
 	// +nullable
 	ExcludedNamespaces []string `json:"excludedNamespaces,omitempty"`
+
+	// zhou: pod, deployment, daemonset, ...
 
 	// IncludedResources specifies the resources to which this hook spec applies. If empty, it applies
 	// to all resources.
@@ -367,6 +403,8 @@ type BackupStatus struct {
 	// +optional
 	Phase BackupPhase `json:"phase,omitempty"`
 
+	// zhou: free style string
+
 	// ValidationErrors is a slice of all validation errors (if
 	// applicable).
 	// +optional
@@ -453,6 +491,8 @@ type BackupStatus struct {
 	HookStatus *HookStatus `json:"hookStatus,omitempty"`
 }
 
+// zhou:
+
 // BackupProgress stores information about the progress of a Backup's execution.
 type BackupProgress struct {
 	// TotalItems is the total number of items to be backed up. This number may change
@@ -489,6 +529,8 @@ type HookStatus struct {
 // +kubebuilder:rbac:groups=velero.io,resources=backups,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups=velero.io,resources=backups/status,verbs=get;update;patch
 
+// zhou:
+
 // Backup is a Velero resource that represents the capture of Kubernetes
 // cluster state at a point in time (API objects and associated volume state).
 type Backup struct {
@@ -499,6 +541,8 @@ type Backup struct {
 
 	// +optional
 	Spec BackupSpec `json:"spec,omitempty"`
+
+	// zhou: NOT set as seperate resource.
 
 	// +optional
 	Status BackupStatus `json:"status,omitempty"`

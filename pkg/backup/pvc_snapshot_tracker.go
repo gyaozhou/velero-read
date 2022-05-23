@@ -22,6 +22,9 @@ import (
 	corev1api "k8s.io/api/core/v1"
 )
 
+// zhou: if the volume is backing with a pvc, and we need to track whether this pvc has been
+//       backed up. Because once a PVC is a RWX type, it may be used by more than one pod.
+
 // pvcSnapshotTracker keeps track of persistent volume claims that have been handled
 // via pod volume backup.
 type pvcSnapshotTracker struct {
@@ -45,6 +48,9 @@ func newPVCSnapshotTracker() *pvcSnapshotTracker {
 		pvcPod: make(map[string]string),
 	}
 }
+
+// zhou: if it is a PVC, tracks it to avoid backup duplicated.
+//       For local volume, no need track.
 
 // Track indicates a volume from a pod should be snapshotted by pod volume backup.
 func (t *pvcSnapshotTracker) Track(pod *corev1api.Pod, volumeName string) {
@@ -97,6 +103,8 @@ func (t *pvcSnapshotTracker) Has(namespace, name string) bool {
 	return found && (status == pvcSnapshotStatusTracked || status == pvcSnapshotStatusTaken)
 }
 
+// zhou: inspect whether the volume is backing with a PVC. If yes, does it already been backed up.
+
 // TakenForPodVolume returns true and the PVC's name if the pod volume with the specified name uses a
 // PVC and that PVC has been taken by pod volume backup.
 func (t *pvcSnapshotTracker) TakenForPodVolume(pod *corev1api.Pod, volume string) (bool, string) {
@@ -104,10 +112,12 @@ func (t *pvcSnapshotTracker) TakenForPodVolume(pod *corev1api.Pod, volume string
 		if podVolume.Name != volume {
 			continue
 		}
-
+		// zhou: always backup local volume
 		if podVolume.PersistentVolumeClaim == nil {
 			return false, ""
 		}
+
+		// zhou: check whether the corresponding pvc has been backed up. Return false if not.
 
 		status, found := t.pvcs[key(pod.Namespace, podVolume.PersistentVolumeClaim.ClaimName)]
 		if !found {
@@ -118,9 +128,10 @@ func (t *pvcSnapshotTracker) TakenForPodVolume(pod *corev1api.Pod, volume string
 			return false, ""
 		}
 
+		// zhou: it is backing with PVC and already been handled.
 		return true, podVolume.PersistentVolumeClaim.ClaimName
 	}
-
+	// zhou: no such volume in this pod
 	return false, ""
 }
 

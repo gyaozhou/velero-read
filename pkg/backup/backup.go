@@ -66,6 +66,8 @@ const BackupVersion = 1
 // BackupFormatVersion is the current backup version for Velero, including major, minor, and patch.
 const BackupFormatVersion = "1.1.0"
 
+// zhou: solid helper to perform backup, implemented by "kubernetesBackupper struct"
+
 // Backupper performs backups.
 type Backupper interface {
 	// Backup takes a backup using the specification in the velerov1api.Backup and writes backup and log data
@@ -96,16 +98,19 @@ type Backupper interface {
 	) error
 }
 
+// zhou: core part. Used to interact with apiserver and plugins to perform such as
+//       AppliesTo(), Execute(), hook, restic, uploading ...
+
 // kubernetesBackupper implements Backupper.
 type kubernetesBackupper struct {
 	kbClient                  kbclient.Client
-	dynamicFactory            client.DynamicFactory
-	discoveryHelper           discovery.Helper
-	podCommandExecutor        podexec.PodCommandExecutor
-	podVolumeBackupperFactory podvolume.BackupperFactory
-	podVolumeTimeout          time.Duration
-	defaultVolumesToFsBackup  bool
-	clientPageSize            int
+	dynamicFactory            client.DynamicFactory      // zhou: dynamic client
+	discoveryHelper           discovery.Helper           // zhou: discovery client
+	podCommandExecutor        podexec.PodCommandExecutor // zhou: client to execute hook in target pod
+	podVolumeBackupperFactory podvolume.BackupperFactory // zhou: resticManager
+	podVolumeTimeout          time.Duration              // zhou: time for waiting each PodVolumeBackup completed
+	defaultVolumesToFsBackup  bool                       // zhou: default to backup or not volume
+	clientPageSize            int                        // zhou: used by informer to list objects, "pager" will use it to limit objects number for each list.
 	uploaderType              string
 	pluginManager             func(logrus.FieldLogger) clientmgmt.Manager
 	backupStoreGetter         persistence.ObjectBackupStoreGetter
@@ -114,6 +119,8 @@ type kubernetesBackupper struct {
 func (i *itemKey) String() string {
 	return fmt.Sprintf("resource=%s,namespace=%s,name=%s", i.resource, i.namespace, i.name)
 }
+
+// zhou: such resources have been moved from group "extensions" to "apps" from k8s 1.6.
 
 func cohabitatingResources() map[string]*cohabitatingResource {
 	return map[string]*cohabitatingResource{
@@ -124,6 +131,8 @@ func cohabitatingResources() map[string]*cohabitatingResource {
 		"events":          newCohabitatingResource("events", "", "events.k8s.io"),
 	}
 }
+
+// zhou: create backupper which is a solid helper
 
 // NewKubernetesBackupper creates a new kubernetesBackupper.
 func NewKubernetesBackupper(
@@ -160,6 +169,7 @@ func getNamespaceIncludesExcludes(backup *velerov1api.Backup) *collections.Inclu
 	return collections.NewIncludesExcludes().Includes(backup.Spec.IncludedNamespaces...).Excludes(backup.Spec.ExcludedNamespaces...)
 }
 
+// zhou: formalize to "ResourceHook struct", which implemented "HandleHooks()"
 func getResourceHooks(hookSpecs []velerov1api.BackupResourceHookSpec, discoveryHelper discovery.Helper) ([]hook.ResourceHook, error) {
 	resourceHooks := make([]hook.ResourceHook, 0, len(hookSpecs))
 
@@ -197,9 +207,12 @@ func getResourceHook(hookSpec velerov1api.BackupResourceHookSpec, discoveryHelpe
 	return h, nil
 }
 
+// zhou: plugin manager implement this interface.
 type VolumeSnapshotterGetter interface {
 	GetVolumeSnapshotter(name string) (vsv1.VolumeSnapshotter, error)
 }
+
+// zhou: ???. This function did similar steps as runBackup() did before BackupWithResolvers().
 
 // Backup backs up the items specified in the Backup, placing them in a gzip-compressed tar file
 // written to backupFile. The finalized velerov1api.Backup is written to metadata. Any error that represents
@@ -212,6 +225,11 @@ func (kb *kubernetesBackupper) Backup(log logrus.FieldLogger, backupRequest *Req
 	return kb.BackupWithResolvers(log, backupRequest, backupFile, backupItemActions, volumeSnapshotterGetter)
 }
 
+// zhou: 1. resolve plugins' ("PluginKindBackupItemAction" "PluginKindItemSnapshotter") interested object kind,
+//       2. discover objects from apiserver,
+//       3. perform plugins' execute(),
+//       4. take cloud VolumeSnapshot,
+
 func (kb *kubernetesBackupper) BackupWithResolvers(
 	log logrus.FieldLogger,
 	backupRequest *Request,
@@ -219,20 +237,28 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 	backupItemActionResolver framework.BackupItemActionResolverV2,
 	volumeSnapshotterGetter VolumeSnapshotterGetter,
 ) error {
+
+	// zhou: Writes to the "gzippedData" are compressed, then written to w.
+
 	gzippedData := gzip.NewWriter(backupFile)
 	defer gzippedData.Close()
 
+	// zhou: write in tar format -> auto be compressed -> write to "backupFile"
 	tw := tar.NewWriter(gzippedData)
 	defer tw.Close()
 
+	// zhou: write file "metadata/version" into tarball file "[backup name].tar.gz"
 	log.Info("Writing backup version file")
 	if err := kb.writeBackupVersion(tw); err != nil {
 		return errors.WithStack(err)
 	}
 
+	// zhou: formalize "backup.spec.includedNamespaces/excludedNamespaces"
 	backupRequest.NamespaceIncludesExcludes = getNamespaceIncludesExcludes(backupRequest.Backup)
 	log.Infof("Including namespaces: %s", backupRequest.NamespaceIncludesExcludes.IncludesString())
 	log.Infof("Excluding namespaces: %s", backupRequest.NamespaceIncludesExcludes.ExcludesString())
+
+	// zhou: formalize "backup.spec.includedResources/excludedResources" ???
 
 	if collections.UseOldResourceFilters(backupRequest.Spec) {
 		backupRequest.ResourceIncludesExcludes = collections.GetGlobalResourceIncludesExcludes(kb.discoveryHelper, log,
@@ -252,6 +278,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 
 	log.Infof("Backing up all volumes using pod volume backup: %t", boolptr.IsSetToTrue(backupRequest.Backup.Spec.DefaultVolumesToFsBackup))
 
+	// zhou: formalize "backup.spec.hooks"
 	var err error
 	backupRequest.ResourceHooks, err = getResourceHooks(backupRequest.Spec.Hooks.Resources, kb.discoveryHelper)
 	if err != nil {
@@ -259,13 +286,23 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		return err
 	}
 
+	// zhou: resolve all "PluginKindBackupItemAction" to get their interested resource list,
+	//       via "AppliesTo()"
+
 	backupRequest.ResolvedActions, err = backupItemActionResolver.ResolveActions(kb.discoveryHelper, log)
 	if err != nil {
 		log.WithError(errors.WithStack(err)).Debugf("Error from backupItemActionResolver.ResolveActions")
 		return err
 	}
 
+	// zhou: objects have been backed up.
+
 	backupRequest.BackedUpItems = map[itemKey]struct{}{}
+
+	// zhou: create restic backupper, the handler to perform restic volume backup
+
+	// zhou: Restic backup all volumes "defaultPodVolumeOperationTimeout" is 240m.
+	//       It could be overwrote by Backup CR's annotations.
 
 	podVolumeTimeout := kb.podVolumeTimeout
 	if val := backupRequest.Annotations[velerov1api.PodVolumeOperationTimeoutAnnotation]; val != "" {
@@ -282,6 +319,10 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 
 	var podVolumeBackupper podvolume.Backupper
 	if kb.podVolumeBackupperFactory != nil {
+		// zhou: TBD: create restic "backupper" via "repositoryManager.NewBackupper()".
+		//       The handler could be used to create PodVolumeRestore CR and
+		//       wait for its phase becomes completion.
+
 		podVolumeBackupper, err = kb.podVolumeBackupperFactory.NewBackupper(ctx, backupRequest.Backup, kb.uploaderType)
 		if err != nil {
 			log.WithError(errors.WithStack(err)).Debugf("Error from NewBackupper")
@@ -297,6 +338,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 	}
 	defer os.RemoveAll(tempDir)
 
+	// zhou: used to collect itmes from API server
 	collector := &itemCollector{
 		log:                   log,
 		backupRequest:         backupRequest,
@@ -307,7 +349,12 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		pageSize:              kb.clientPageSize,
 	}
 
+	// zhou: compare all kinds from apiserver with Backup CR described and plugins interested resource.
+	//       If the kind is matched, fetch all resouces of this kind.
+	//       But items are temporary, will be finally decided in "itemBackupper.backupItem()"
+
 	items := collector.getAllItems()
+
 	log.WithField("progress", "").Infof("Collected %d items matching the backup spec from the Kubernetes API (actual number of items backed up may be more or less depending on velero.io/exclude-from-backup annotation, plugins returning additional related items to back up, etc.)", len(items))
 
 	updated := backupRequest.Backup.DeepCopy()
@@ -315,12 +362,16 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		updated.Status.Progress = &velerov1api.BackupProgress{}
 	}
 
+	// zhou: patch "progress.totalItems" in Backup CR status
+
 	updated.Status.Progress.TotalItems = len(items)
 	if err := kube.PatchResource(backupRequest.Backup, updated, kb.kbClient); err != nil {
 		log.WithError(errors.WithStack((err))).Warn("Got error trying to update backup's status.progress.totalItems")
 	}
 	backupRequest.Status.Progress = &velerov1api.BackupProgress{TotalItems: len(items)}
 
+	// zhou: "itemBackupper struct" is used to handle one object's related actions, e.g.
+	//       plugin, hook, restic.
 	itemBackupper := &itemBackupper{
 		backupRequest:            backupRequest,
 		tarWriter:                tw,
@@ -351,6 +402,8 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 	// it's done sending progress updates
 	quit := make(chan struct{})
 
+	// zhou: update status/progress in a temporary goroutine.
+
 	// This is the progress updater goroutine that receives
 	// progress updates on the 'update' channel. It patches
 	// the backup CR with progress updates at most every second,
@@ -368,6 +421,9 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 			case val := <-update:
 				lastUpdate = &val
 			case <-ticker.C:
+				// zhou: add abort checking here cancelFunc()?
+				//       Update PodVolumeBackup also.
+
 				if lastUpdate != nil {
 					updated := backupRequest.Backup.DeepCopy()
 					if updated.Status.Progress == nil {
@@ -387,6 +443,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 
 	backedUpGroupResources := map[schema.GroupResource]bool{}
 
+	// zhou: handle objects fetched from apiserver,
 	for i, item := range items {
 		log.WithFields(map[string]interface{}{
 			"progress":  "",
@@ -400,20 +457,26 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		func() {
 			var unstructured unstructured.Unstructured
 
+			// zhou: each object is stored in a seprated temp file.
 			f, err := os.Open(item.path)
 			if err != nil {
 				log.WithError(errors.WithStack(err)).Error("Error opening file containing item")
 				return
 			}
+			// zhou: using anonymous func, we can execute these deferred functions as soon as possible.
 			defer f.Close()
 			defer os.Remove(f.Name())
 
+			// zhou: decode resource to struct from temp file
 			if err := json.NewDecoder(f).Decode(&unstructured); err != nil {
 				log.WithError(errors.WithStack(err)).Error("Error decoding JSON from file")
 				return
 			}
 
+			// zhou: wrapper core function, used to invoke "itemBackupper.backupItem()"
+			//       object "unstructured" related actions will be taken.
 			if backedUp := kb.backupItem(log, item.groupResource, itemBackupper, &unstructured, item.preferredGVR); backedUp {
+				// zhou: this item indeed need backup.
 				backedUpGroupResources[item.groupResource] = true
 			}
 		}()
@@ -434,10 +497,13 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 			"namespace": item.namespace,
 			"name":      item.name,
 		}).Infof("Backed up %d items out of an estimated total of %d (estimate will change throughout the backup)", len(backupRequest.BackedUpItems), totalItems)
-	}
+	} // zhou: end of loop each item
 
 	// no more progress updates will be sent on the 'update' channel
 	quit <- struct{}{}
+
+	// zhou: TBD: in case backup.spec.IncludeClusterResources is auto. We have to backup
+	//       corresponding CRD which CR is already backed up.
 
 	// back up CRD(this is a CRD definition of the resource, it's a CRD instance) for resource if found.
 	// We should only need to do this if we've backed up at least one item for the resource
@@ -485,7 +551,11 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 	return nil
 }
 
+// zhou: wrapper of "itemBackupper.backupItem()"
+
 func (kb *kubernetesBackupper) backupItem(log logrus.FieldLogger, gr schema.GroupResource, itemBackupper *itemBackupper, unstructured *unstructured.Unstructured, preferredGVR schema.GroupVersionResource) bool {
+	// zhou: handle one object's related work.
+
 	backedUpItem, _, err := itemBackupper.backupItem(log, unstructured, gr, preferredGVR, false, false)
 	if aggregate, ok := err.(kubeerrs.Aggregate); ok {
 		log.WithField("name", unstructured.GetName()).Infof("%d errors encountered backup up item", len(aggregate.Errors()))
@@ -529,6 +599,8 @@ func (kb *kubernetesBackupper) finalizeItem(
 	return backedUpItem, updateFiles
 }
 
+// zhou: if some CRs are backed up, then we have to backup CRD.
+
 // backupCRD checks if the resource is a custom resource, and if so, backs up the custom resource definition
 // associated with it.
 func (kb *kubernetesBackupper) backupCRD(log logrus.FieldLogger, gr schema.GroupResource, itemBackupper *itemBackupper) {
@@ -565,11 +637,15 @@ func (kb *kubernetesBackupper) backupCRD(log logrus.FieldLogger, gr schema.Group
 
 	log.Infof("Found associated CRD %s to add to backup", gr.String())
 
+	// zhou: backup CRD like other resources.
 	kb.backupItem(log, gvr.GroupResource(), itemBackupper, unstructured, gvr)
 }
 
+// zhou: write file "metadata/version" into tarball file "[backup name].tar.gz"
+
 func (kb *kubernetesBackupper) writeBackupVersion(tw *tar.Writer) error {
 	versionFile := filepath.Join(velerov1api.MetadataDir, "version")
+	// zhou: "1.1.0"
 	versionString := fmt.Sprintf("%s\n", BackupFormatVersion)
 
 	hdr := &tar.Header{

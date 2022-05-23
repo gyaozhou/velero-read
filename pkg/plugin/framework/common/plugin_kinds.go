@@ -25,12 +25,18 @@ func (k PluginKind) String() string {
 	return string(k)
 }
 
+// zhou: plugin types
 const (
+	// zhou: these two kinds need to be handled separately.
+
 	// PluginKindObjectStore represents an object store plugin.
 	PluginKindObjectStore PluginKind = "ObjectStore"
 
 	// PluginKindVolumeSnapshotter represents a volume snapshotter plugin.
 	PluginKindVolumeSnapshotter PluginKind = "VolumeSnapshotter"
+
+	// zhou: these 4 kinds share the same interface "AppliesTo()"/"Execute()"
+	//       utilize action_resovler.go for AppliesTo()
 
 	// PluginKindBackupItemAction represents a backup item action plugin.
 	PluginKindBackupItemAction PluginKind = "BackupItemAction"

@@ -33,6 +33,8 @@ type ScheduleSpec struct {
 	// the Backup.
 	Schedule string `json:"schedule"`
 
+	// zhou: default behavior is equal to false.
+
 	// UseOwnerReferencesBackup specifies whether to use
 	// OwnerReferences on backups created by this Schedule.
 	// +optional

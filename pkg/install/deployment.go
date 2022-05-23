@@ -32,6 +32,7 @@ import (
 
 type podTemplateOption func(*podTemplateConfig)
 
+// zhou: used by not only Velero Deployment but also Restic DaemonSet.
 type podTemplateConfig struct {
 	image                           string
 	envVars                         []corev1.EnvVar
@@ -185,6 +186,8 @@ func WithMaintenanceConfig(config repository.MaintenanceConfig) podTemplateOptio
 	}
 }
 
+// zhou: velero deployment
+
 func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment {
 	// TODO: Add support for server args
 	c := &podTemplateConfig{
@@ -195,12 +198,14 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 		opt(c)
 	}
 
+	// zhou: always pull if image is "latest"
 	pullPolicy := corev1.PullAlways
 	imageParts := strings.Split(c.image, ":")
 	if len(imageParts) == 2 && imageParts[1] != "latest" {
 		pullPolicy = corev1.PullIfNotPresent
 	}
 
+	// zhou: "velero server ..." arguments.
 	args := []string{"server"}
 	if len(c.features) > 0 {
 		args = append(args, fmt.Sprintf("--features=%s", strings.Join(c.features, ",")))
@@ -279,6 +284,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 					RestartPolicy:      corev1.RestartPolicyAlways,
 					ServiceAccountName: c.serviceAccountName,
 					Containers: []corev1.Container{
+						// zhou: only one container
 						{
 							Name:            "velero",
 							Image:           c.image,
@@ -338,6 +344,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 		},
 	}
 
+	// zhou: mount Secret as volume
 	if c.withSecret {
 		deployment.Spec.Template.Spec.Volumes = append(
 			deployment.Spec.Template.Spec.Volumes,
@@ -359,6 +366,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 			},
 		)
 
+		// zhou: used by pkg/restic/aws.go
 		deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, []corev1.EnvVar{
 			{
 				Name:  "GOOGLE_APPLICATION_CREDENTIALS",
@@ -381,6 +389,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 
 	deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, c.envVars...)
 
+	// zhou: run plugin as init container, then their image will auto copy binary to "/plugins/"
 	if len(c.plugins) > 0 {
 		for _, image := range c.plugins {
 			container := *builder.ForPluginContainer(image, pullPolicy).Result()

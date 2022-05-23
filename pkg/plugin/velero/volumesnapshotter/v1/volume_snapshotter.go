@@ -20,6 +20,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// zhou: Volume Snapshot plugin interface
+
 // VolumeSnapshotter defines the operations needed by Velero to
 // take snapshots of persistent volumes during backup, and to restore
 // persistent volumes from snapshots during restore.

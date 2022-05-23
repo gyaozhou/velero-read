@@ -57,6 +57,7 @@ var (
 	DefaultVeleroNamespace = "velero"
 )
 
+// zhou: default lablel
 func Labels() map[string]string {
 	return map[string]string{
 		"component": "velero",
@@ -110,6 +111,7 @@ func objectMeta(namespace, name string) metav1.ObjectMeta {
 	}
 }
 
+// zhou: ServiceAccount "velero"
 func ServiceAccount(namespace string, annotations map[string]string) *corev1.ServiceAccount {
 	objMeta := objectMeta(namespace, defaultServiceAccountName)
 	objMeta.Annotations = annotations
@@ -191,6 +193,8 @@ func BackupStorageLocation(namespace, provider, bucket, prefix string, config ma
 	}
 }
 
+// zhou:
+
 func VolumeSnapshotLocation(namespace, provider string, config map[string]string) *velerov1api.VolumeSnapshotLocation {
 	return &velerov1api.VolumeSnapshotLocation{
 		ObjectMeta: objectMeta(namespace, "default"),
@@ -205,6 +209,12 @@ func VolumeSnapshotLocation(namespace, provider string, config map[string]string
 	}
 }
 
+// zhou: create Secret "cloud-credentials", from content "secret-file" provided in "velero install".
+//       e.g.
+//       [default]
+//       aws_access_key_id = minio
+//       aws_secret_access_key = password123
+
 func Secret(namespace string, data []byte) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: objectMeta(namespace, "cloud-credentials"),
@@ -212,6 +222,8 @@ func Secret(namespace string, data []byte) *corev1.Secret {
 			Kind:       "Secret",
 			APIVersion: corev1.SchemeGroupVersion.String(),
 		},
+		// zhou: still hardcode "cloud" as key, that's because "cloud" will be filename within container,
+		//       e.g. "/credentials/cloud"
 		Data: map[string][]byte{
 			"cloud": data,
 		},
@@ -219,6 +231,7 @@ func Secret(namespace string, data []byte) *corev1.Secret {
 	}
 }
 
+// zhou: README,
 func appendUnstructured(list *unstructured.UnstructuredList, obj runtime.Object) error {
 	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&obj)
 
@@ -232,6 +245,7 @@ func appendUnstructured(list *unstructured.UnstructuredList, obj runtime.Object)
 	return nil
 }
 
+// zhou: options from "velero install"
 type VeleroOptions struct {
 	Namespace                       string
 	Image                           string
@@ -244,7 +258,7 @@ type VeleroOptions struct {
 	ServiceAccountName              string
 	VeleroPodResources              corev1.ResourceRequirements
 	NodeAgentPodResources           corev1.ResourceRequirements
-	SecretData                      []byte
+	SecretData                      []byte // zhou: used for BSL's default credential and VSL's credential.
 	RestoreOnly                     bool
 	UseNodeAgent                    bool
 	PrivilegedNodeAgent             bool
@@ -268,12 +282,15 @@ type VeleroOptions struct {
 	MaintenanceCfg                  repository.MaintenanceConfig
 }
 
+// zhou: get all velero CRD objects need to install.
 func AllCRDs() *unstructured.UnstructuredList {
 	resources := new(unstructured.UnstructuredList)
 	// Set the GVK so that the serialization framework outputs the list properly
 	resources.SetGroupVersionKind(schema.GroupVersionKind{Group: "", Version: "v1", Kind: "List"})
 
+	// zhou: "v1crds.CRDs" is
 	for _, crd := range v1crds.CRDs {
+		// zhou: set component name label.
 		crd.SetLabels(Labels())
 		if err := appendUnstructured(resources, crd); err != nil {
 			fmt.Printf("error appending v1 CRD %s: %s\n", crd.GetName(), err.Error())
@@ -290,9 +307,12 @@ func AllCRDs() *unstructured.UnstructuredList {
 	return resources
 }
 
+// zhou: gather all resources need to create
+
 // AllResources returns a list of all resources necessary to install Velero, in the appropriate order, into a Kubernetes cluster.
 // Items are unstructured, since there are different data types returned.
 func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
+	// zhou: velero CRD
 	resources := AllCRDs()
 
 	ns := Namespace(o.Namespace)
@@ -300,12 +320,17 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		fmt.Printf("error appending Namespace %s: %s\n", ns.GetName(), err.Error())
 	}
 
+	// zhou: bind with "cluster-admin" role.
+
 	serviceAccountName := defaultServiceAccountName
 	if o.ServiceAccountName == "" {
 		crb := ClusterRoleBinding(o.Namespace)
 		if err := appendUnstructured(resources, crb); err != nil {
 			fmt.Printf("error appending ClusterRoleBinding %s: %s\n", crb.GetName(), err.Error())
 		}
+
+		// zhou: why not create ServiceAccount firstly.
+
 		sa := ServiceAccount(o.Namespace, o.ServiceAccountAnnotations)
 		if err := appendUnstructured(resources, sa); err != nil {
 			fmt.Printf("error appending ServiceAccount %s: %s\n", sa.GetName(), err.Error())
@@ -314,6 +339,7 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		serviceAccountName = o.ServiceAccountName
 	}
 
+	// zhou: create Secret
 	if o.SecretData != nil {
 		sec := Secret(o.Namespace, o.SecretData)
 		if err := appendUnstructured(resources, sec); err != nil {
@@ -321,12 +347,15 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		}
 	}
 
+	// zhou: create default BackupStorageLocation
 	if !o.NoDefaultBackupLocation {
 		bsl := BackupStorageLocation(o.Namespace, o.ProviderName, o.Bucket, o.Prefix, o.BSLConfig, o.CACertData)
 		if err := appendUnstructured(resources, bsl); err != nil {
 			fmt.Printf("error appending BackupStorageLocation %s: %s\n", bsl.GetName(), err.Error())
 		}
 	}
+
+	// zhou: create object VolumeSnapshotLocation
 
 	// A snapshot location may not be desirable for users relying on pod volume backup/restore
 	if o.UseVolumeSnapshots {
@@ -338,6 +367,7 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 
 	secretPresent := o.SecretData != nil
 
+	// zhou: customize Velero Deployment by flags provided by user.
 	deployOpts := []podTemplateOption{
 		WithAnnotations(o.PodAnnotations),
 		WithLabels(o.PodLabels),
@@ -377,16 +407,25 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		deployOpts = append(deployOpts, WithDisableInformerCache())
 	}
 
+	// zhou: alwasy create object Deployment
+
 	deploy := Deployment(o.Namespace, deployOpts...)
 
 	if err := appendUnstructured(resources, deploy); err != nil {
 		fmt.Printf("error appending Deployment %s: %s\n", deploy.GetName(), err.Error())
 	}
 
+	// zhou: TBD, once specified "use-restic" in cli, then create object DaemonSet.
+
 	if o.UseNodeAgent {
+
+		// zhou: TBD, customize Restic DaemonSet by flags provided by user.
+
 		dsOpts := []podTemplateOption{
 			WithAnnotations(o.PodAnnotations),
 			WithLabels(o.PodLabels),
+			// zhou: "velero restic server" use the same image as "velero server".
+			//       It will reconcile PodVolumeBackup and PodVolumeRestore.
 			WithImage(o.Image),
 			WithResources(o.NodeAgentPodResources),
 			WithSecret(secretPresent),

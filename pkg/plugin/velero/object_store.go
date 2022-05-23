@@ -21,6 +21,9 @@ import (
 	"time"
 )
 
+// zhou: Object Store plugin interface,
+//       implemented by "restartableObjectStore struct",
+
 // ObjectStore exposes basic object-storage operations required
 // by Velero.
 type ObjectStore interface {

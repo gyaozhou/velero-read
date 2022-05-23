@@ -45,6 +45,7 @@ type Context struct {
 	resolvedActions []framework.DeleteItemResolvedAction
 }
 
+// zhou: README,
 func InvokeDeleteActions(ctx *Context) error {
 	var err error
 	resolver := framework.NewDeleteItemActionResolver(ctx.Actions)

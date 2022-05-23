@@ -66,6 +66,8 @@ func Stream(
 	return nil
 }
 
+// zhou: README, download file from object store
+
 func getDownloadURL(
 	ctx context.Context,
 	kbClient kbclient.Client,

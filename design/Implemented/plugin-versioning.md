@@ -6,7 +6,7 @@ It will allow for backwards compatible changes to be made, such as the addition 
 
 
 ## Background
-When changes are made to Velero’s plugin APIs, there is no mechanism for the Velero server to communicate the version of the API that is supported, or for plugins to communicate what version they implement.
+When changes are made to Velero's plugin APIs, there is no mechanism for the Velero server to communicate the version of the API that is supported, or for plugins to communicate what version they implement.
 This means that any modification to a plugin API is a backwards incompatible change as it requires all plugins which implement the API to update and implement the new method.
 
 There are several components involved to use plugins within Velero.

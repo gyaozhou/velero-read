@@ -16,6 +16,10 @@ limitations under the License.
 
 package volume
 
+// zhou: due to there is NO a CRD represents Cloud backing VolumeSnapshot (stored in VSL),
+//       using this object to represent it.
+//       Deprecated, will be replaced by ItemSnapshot.
+
 // Snapshot stores information about a persistent volume snapshot taken as
 // part of a Velero backup.
 type Snapshot struct {
@@ -39,12 +43,16 @@ type SnapshotSpec struct {
 	// PersistentVolumeName is the Kubernetes name for the volume.
 	PersistentVolumeName string `json:"persistentVolumeName"`
 
+	// zhou: volume id within cloud service provider
+
 	// ProviderVolumeID is the provider's ID for the volume.
 	ProviderVolumeID string `json:"providerVolumeID"`
 
 	// VolumeType is the type of the disk/volume in the cloud provider
 	// API.
 	VolumeType string `json:"volumeType"`
+
+	// zhou: Available Zone info
 
 	// VolumeAZ is the where the volume is provisioned
 	// in the cloud provider.

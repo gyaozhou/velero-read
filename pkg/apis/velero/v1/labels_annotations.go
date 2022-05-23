@@ -26,6 +26,7 @@ const (
 	// RestoreNameLabel is the label key used to identify a restore by name.
 	RestoreNameLabel = "velero.io/restore-name"
 
+	// zhou: used in Backup CR
 	// ScheduleNameLabel is the label key used to identify a schedule by name.
 	ScheduleNameLabel = "velero.io/schedule-name"
 
@@ -37,6 +38,9 @@ const (
 
 	// PVCUIDLabel is the label key used to identify a PVC by uid.
 	PVCUIDLabel = "velero.io/pvc-uid"
+
+	// zhou: overwrite timeout for volumes within this backup/restore processing.
+	//       Need user set annotation on backup/restore cr.
 
 	// PodVolumeOperationTimeoutAnnotation is the annotation key used to apply
 	// a backup/restore-specific timeout value for pod volume operations (i.e.

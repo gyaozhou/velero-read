@@ -36,6 +36,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// zhou: internal plugin, handle {BackupItemAction, "velero.io/crd-remap-version"} if installed
+
 // RemapCRDVersionAction inspects CustomResourceDefinition and decides if it is a v1
 // CRD that needs to be backed up as v1beta1.
 type RemapCRDVersionAction struct {

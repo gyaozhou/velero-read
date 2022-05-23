@@ -49,6 +49,7 @@ func NewDynamicFactory(dynamicClient dynamic.Interface) DynamicFactory {
 	return &dynamicFactory{dynamicClient: dynamicClient}
 }
 
+// zhou: wrapper of dynamic client
 func (f *dynamicFactory) ClientForGroupVersionResource(gv schema.GroupVersion, resource metav1.APIResource, namespace string) (Dynamic, error) {
 	return &dynamicResourceClient{
 		resourceClient: f.dynamicClient.Resource(gv.WithResource(resource.Name)).Namespace(namespace),

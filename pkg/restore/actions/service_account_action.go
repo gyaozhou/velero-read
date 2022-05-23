@@ -29,6 +29,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
+// zhou: internal plugin, handle {RestoreItemAction, "velero.io/service-account"}
+
 type ServiceAccountAction struct {
 	logger logrus.FieldLogger
 }

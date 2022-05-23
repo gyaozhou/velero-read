@@ -35,6 +35,8 @@ import (
 
 const defaultTimeout = 30 * time.Second
 
+// zhou: implemented by "defaultPodCommandExecutor struct", used by hook.
+
 // PodCommandExecutor is capable of executing a command in a container in a pod.
 type PodCommandExecutor interface {
 	// ExecutePodCommand executes a command in a container in a pod. If the command takes longer than
@@ -45,6 +47,8 @@ type PodCommandExecutor interface {
 type poster interface {
 	Post() *rest.Request
 }
+
+// zhou:
 
 type defaultPodCommandExecutor struct {
 	restClientConfig *rest.Config
@@ -62,6 +66,8 @@ func NewPodCommandExecutor(restClientConfig *rest.Config, restClient poster) Pod
 		streamExecutorFactory: &defaultStreamExecutorFactory{},
 	}
 }
+
+// zhou: README, work as "kubectl exec".
 
 // ExecutePodCommand uses the pod exec API to execute a command in a container in a pod. If the
 // command takes longer than the specified timeout, an error is returned (NOTE: it is not currently
@@ -111,6 +117,7 @@ func (e *defaultPodCommandExecutor) ExecutePodCommand(log logrus.FieldLogger, it
 		localHook.OnError = api.HookErrorModeFail
 	}
 
+	// zhou: set how long the command may execute. 30s as default.
 	if localHook.Timeout.Duration == 0 {
 		localHook.Timeout.Duration = defaultTimeout
 	}
@@ -132,6 +139,7 @@ func (e *defaultPodCommandExecutor) ExecutePodCommand(log logrus.FieldLogger, it
 
 	hookLog.Info("running exec hook")
 
+	// zhou: README,
 	req := e.restClient.Post().
 		Resource("pods").
 		Namespace(namespace).
@@ -193,6 +201,7 @@ func ensureContainerExists(pod *corev1api.Pod, container string) error {
 	return errors.Errorf("no such container: %q", container)
 }
 
+// zhou: if user doesn't specify the "container", using the first container.
 func setDefaultHookContainer(pod *corev1api.Pod, hook *api.ExecHook) error {
 	if len(pod.Spec.Containers) < 1 {
 		return errors.New("need at least 1 container")
@@ -202,6 +211,8 @@ func setDefaultHookContainer(pod *corev1api.Pod, hook *api.ExecHook) error {
 
 	return nil
 }
+
+// zhou: README,
 
 type streamExecutorFactory interface {
 	NewSPDYExecutor(config *rest.Config, method string, url *url.URL) (remotecommand.Executor, error)

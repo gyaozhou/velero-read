@@ -86,6 +86,8 @@ const (
 	BackupLastStatusFailure int64 = 0
 )
 
+// zhou: velero server metrics http server
+
 // NewServerMetrics returns new ServerMetrics
 func NewServerMetrics() *ServerMetrics {
 	return &ServerMetrics{
@@ -326,6 +328,8 @@ func NewServerMetrics() *ServerMetrics {
 		},
 	}
 }
+
+// zhou: restic server metrics http server
 
 func NewNodeMetrics() *ServerMetrics {
 	return &ServerMetrics{

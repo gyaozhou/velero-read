@@ -22,9 +22,13 @@ import (
 
 // BackupRepositorySpec is the specification for a BackupRepository.
 type BackupRepositorySpec struct {
+	// zhou: each pod/volume namespace corresponding to different restic repo.
+
 	// VolumeNamespace is the namespace this backup repository contains
 	// pod volume backups for.
 	VolumeNamespace string `json:"volumeNamespace"`
+
+	// zhou: restic backup data to object store.
 
 	// BackupStorageLocation is the name of the BackupStorageLocation
 	// that should contain this repository.

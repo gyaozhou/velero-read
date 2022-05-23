@@ -50,6 +50,8 @@ func NewPeriodicalEnqueueSource(
 	}
 }
 
+// zhou: MARKME, implement user defined event source, including timer triggered or out of cluster triggerred.
+
 // PeriodicalEnqueueSource is an implementation of interface sigs.k8s.io/controller-runtime/pkg/source/Source
 // It reads the specific resources from Kubernetes/cache and enqueues them into the queue to trigger
 // the reconcile logic periodically
@@ -65,8 +67,13 @@ type PeriodicalEnqueueSourceOption struct {
 	OrderFunc func(objList client.ObjectList) client.ObjectList
 }
 
+// zhou: source of event
+
 // Start enqueue items periodically. The predicates only apply to the GenericEvent
 func (p *PeriodicalEnqueueSource) Start(ctx context.Context, h handler.EventHandler, q workqueue.RateLimitingInterface, predicates ...predicate.Predicate) error {
+
+	// zhou: run func for each "p.period"
+
 	go wait.Until(func() {
 		p.logger.Debug("enqueueing resources ...")
 		// empty the list otherwise the result of the new list call will be appended
@@ -74,6 +81,9 @@ func (p *PeriodicalEnqueueSource) Start(ctx context.Context, h handler.EventHand
 			p.logger.WithError(err).Error("error reset resource list")
 			return
 		}
+
+		// zhou: list all objects in cache
+
 		if err := p.List(ctx, p.objList); err != nil {
 			p.logger.WithError(err).Error("error listing resources")
 			return
@@ -85,12 +95,16 @@ func (p *PeriodicalEnqueueSource) Start(ctx context.Context, h handler.EventHand
 		if p.option.OrderFunc != nil {
 			p.objList = p.option.OrderFunc(p.objList)
 		}
+
+		// zhou: go through "objList" one by one
+
 		if err := meta.EachListItem(p.objList, func(object runtime.Object) error {
 			obj, ok := object.(client.Object)
 			if !ok {
 				p.logger.Error("%s's type isn't metav1.Object", object.GetObjectKind().GroupVersionKind().String())
 				return nil
 			}
+
 			event := event.GenericEvent{Object: obj}
 			for _, predicate := range predicates {
 				if !predicate.Generic(event) {
@@ -98,6 +112,8 @@ func (p *PeriodicalEnqueueSource) Start(ctx context.Context, h handler.EventHand
 					return nil
 				}
 			}
+
+			// zhou: add it to event queue.
 
 			q.Add(ctrl.Request{
 				NamespacedName: types.NamespacedName{
@@ -107,6 +123,7 @@ func (p *PeriodicalEnqueueSource) Start(ctx context.Context, h handler.EventHand
 			})
 			p.logger.Debugf("resource %s/%s enqueued", obj.GetNamespace(), obj.GetName())
 			return nil
+
 		}); err != nil {
 			p.logger.WithError(err).Error("error enqueueing resources")
 			return

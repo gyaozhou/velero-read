@@ -26,6 +26,8 @@ type featureFlagSet struct {
 	set sets.Set[string]
 }
 
+// zhou: store all feature flags.
+
 // featureFlags will store all the flags for this process until NewFeatureFlagSet is called.
 var featureFlags featureFlagSet
 

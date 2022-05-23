@@ -43,18 +43,29 @@ import (
 // itemCollector collects items from the Kubernetes API according to
 // the backup spec and writes them to files inside dir.
 type itemCollector struct {
-	log                   logrus.FieldLogger
-	backupRequest         *Request
-	discoveryHelper       discovery.Helper
-	dynamicFactory        client.DynamicFactory
+	log logrus.FieldLogger
+	// zhou: includes what the Backup CR and plugins interested resources.
+	backupRequest *Request
+	// zhou: local cache of apiserver's resouces kind.
+	discoveryHelper discovery.Helper
+	dynamicFactory  client.DynamicFactory
+	// zhou: ???
 	cohabitatingResources map[string]*cohabitatingResource
-	dir                   string
-	pageSize              int
+	// zhou: "a temp dir use to temporarily store items as they're scraped from the API."
+	dir string
+	// zhou: used in informer, the number objects to list from apiserver each time.
+	pageSize int
 }
 
+// zhou: used to describe each resource to be backup, the resources already be stored in separate
+//
+//	temp file described by "path".
 type kubernetesResource struct {
-	groupResource         schema.GroupResource
-	preferredGVR          schema.GroupVersionResource
+	groupResource schema.GroupResource
+	preferredGVR  schema.GroupVersionResource
+	// zhou: "path" is the temp file store this resource
+	//       "name" of the resource
+	//       "namespace" of the resouroce
 	namespace, name, path string
 }
 
@@ -67,6 +78,9 @@ func (r *itemCollector) getItemsFromResourceIdentifiers(resourceIDs []velero.Res
 	}
 	return r.getItems(grResourceIDsMap)
 }
+
+// zhou: get all Backup CR described and plugins interested objects
+//       "server.initDiscoveryHelper()" will set a timer to "discoveryHelper.Refresh()" every 5 mins.
 
 // getAllItems gets all relevant items from all API groups.
 func (r *itemCollector) getAllItems() []*kubernetesResource {
@@ -96,6 +110,8 @@ func (r *itemCollector) getItems(resourceIDsMap map[schema.GroupResource][]veler
 	return resources
 }
 
+// zhou: handle a single API group
+
 // getGroupItems collects all relevant items from a single API group.
 // If resourceIDsMap is supplied, then only those items are returned,
 // with GVR/APIResource metadata supplied.
@@ -109,6 +125,13 @@ func (r *itemCollector) getGroupItems(log logrus.FieldLogger, group *metav1.APIR
 	if err != nil {
 		return nil, errors.Wrapf(err, "error parsing GroupVersion %q", group.GroupVersion)
 	}
+
+	// zhou: Because restic volume backup depends on resource "pod", velero handles restic
+	//       volume backup firstly. So we need to handle Pod firstly.
+	//       Once a PVC/PV was backed up by restic, it will not be taken cloud or CSI snapshot.
+	//       CSI snapshot depends on resource "pvc", so it will perform secondly.
+	//       Cloud VolumeSnapshot depends on resource "pv", so it will perform at last.
+
 	if gv.Group == "" {
 		// This is the core group, so make sure we process in the following order: pods, pvcs, pvs,
 		// everything else.
@@ -117,6 +140,9 @@ func (r *itemCollector) getGroupItems(log logrus.FieldLogger, group *metav1.APIR
 
 	var items []*kubernetesResource
 	for _, resource := range group.APIResources {
+
+		// zhou: filter out objects to be backed up of each resource kind.
+
 		resourceItems, err := r.getResourceItems(log, gv, resource, resourceIDsMap)
 		if err != nil {
 			log.WithError(err).WithField("resource", resource.String()).Error("Error getting items for resource")
@@ -128,6 +154,8 @@ func (r *itemCollector) getGroupItems(log logrus.FieldLogger, group *metav1.APIR
 
 	return items, nil
 }
+
+// zhou: README,
 
 // sortResourcesByOrder sorts items by the names specified in "order".  Items are not in order will be put at the end in original order.
 func sortResourcesByOrder(log logrus.FieldLogger, items []*kubernetesResource, order []string) []*kubernetesResource {
@@ -174,11 +202,15 @@ func sortResourcesByOrder(log logrus.FieldLogger, items []*kubernetesResource, o
 	return sortedItems
 }
 
+// zhou: get user specified backup order of this kind.
+
 // getOrderedResourcesForType gets order of resourceType from orderResources.
 func getOrderedResourcesForType(orderedResources map[string]string, resourceType string) []string {
 	if orderedResources == nil {
 		return nil
 	}
+
+	// zhou: check whether user specify the resource order for this kind.
 	orderStr, ok := orderedResources[resourceType]
 	if !ok || len(orderStr) == 0 {
 		return nil
@@ -186,6 +218,9 @@ func getOrderedResourcesForType(orderedResources map[string]string, resourceType
 	orders := strings.Split(orderStr, ",")
 	return orders
 }
+
+// zhou: for this kind, checks each criteria to filter out objects in apiserver to be backed up.
+//       And write each objects to a seperate temp file.
 
 // getResourceItems collects all relevant items for a given group-version-resource.
 // If resourceIDsMap is supplied, the items will be pulled from here
@@ -200,7 +235,12 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 		gr  = gvr.GroupResource()
 	)
 
+	// zhou: user specified backup order of this kind
+
 	orders := getOrderedResourcesForType(r.backupRequest.Backup.Spec.OrderedResources, resource.Name)
+
+	// zhou: README,
+
 	// Getting the preferred group version of this resource
 	preferredGVR, _, err := r.discoveryHelper.ResourceFor(gr.WithVersion(""))
 	if err != nil {
@@ -251,11 +291,13 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 		return items, nil
 	}
 
+	// zhou: handle resources includes/excludes
 	if !r.backupRequest.ResourceIncludesExcludes.ShouldInclude(gr.String()) {
 		log.Infof("Skipping resource because it's excluded")
 		return nil, nil
 	}
 
+	// zhou: handle cohabitating Resource.
 	if cohabitator, found := r.cohabitatingResources[resource.Name]; found {
 		if gv.Group == cohabitator.groupResource1.Group || gv.Group == cohabitator.groupResource2.Group {
 			if cohabitator.seen {
@@ -267,6 +309,7 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 				).Infof("Skipping resource because it cohabitates and we've already processed it")
 				return nil, nil
 			}
+			// zhou: set flag since already processed it.
 			cohabitator.seen = true
 		}
 	}
@@ -291,14 +334,22 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 		return items, nil
 	}
 
+	// zhou: this kind is not namespaced resource, don't need care about includes/excludes namespaces.
+
 	clusterScoped := !resource.Namespaced
 	namespacesToList := getNamespacesToList(r.backupRequest.NamespaceIncludesExcludes)
 
 	// If we get here, we're backing up something other than namespaces
 	if clusterScoped {
+		// zhou: set single item "" which means cluster scope !!!
+		//       So following "namespacesToList" loop, cluster scope resources also be handled.
 		namespacesToList = []string{""}
 	}
 
+	// zhou: in case of include every namespace, namespacesToList == []string{""}, which means
+	//       don't care about namespace.
+
+	// zhou: get objects within each namespace one by one.
 	var items []*kubernetesResource
 
 	for _, namespace := range namespacesToList {
@@ -320,6 +371,7 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 			orLabelSelectors = []string{}
 		}
 
+		// zhou: fetch from apiserver, all items match LabelSelector and namespace only.
 		log.Info("Listing items")
 		unstructuredItems := make([]unstructured.Unstructured, 0)
 
@@ -357,6 +409,8 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 		for i := range unstructuredItems {
 			item := &unstructuredItems[i]
 
+			// zhou: put this single object in file.
+
 			path, err := r.writeToFile(item)
 			if err != nil {
 				log.WithError(err).Error("Error writing item to file")
@@ -379,11 +433,15 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 	return items, nil
 }
 
+// zhou: write a single object to temp file, and return the file path.
+//       By this way to avoid memory blow up?
+
 func (r *itemCollector) writeToFile(item *unstructured.Unstructured) (string, error) {
 	f, err := os.CreateTemp(r.dir, "")
 	if err != nil {
 		return "", errors.Wrap(err, "error creating temp file")
 	}
+	// zhou: file not be removed
 	defer f.Close()
 
 	jsonBytes, err := json.Marshal(item)
@@ -401,6 +459,8 @@ func (r *itemCollector) writeToFile(item *unstructured.Unstructured) (string, er
 
 	return f.Name(), nil
 }
+
+// zhou: sort resource in core group in order of "pod/pvc/pv/other".
 
 // sortCoreGroup sorts the core API group.
 func sortCoreGroup(group *metav1.APIResourceList) {
@@ -435,6 +495,8 @@ func coreGroupResourcePriority(resource string) int {
 	return other
 }
 
+// zhou: actual namespace list, all "". Here can't handle includes "*" excludes some namespaces.
+
 // getNamespacesToList examines ie and resolves the includes and excludes to a full list of
 // namespaces to list. If ie is nil or it includes *, the result is just "" (list across all
 // namespaces). Otherwise, the result is a list of every included namespace minus all excluded ones.
@@ -462,7 +524,9 @@ type cohabitatingResource struct {
 	resource       string
 	groupResource1 schema.GroupResource
 	groupResource2 schema.GroupResource
-	seen           bool
+	// zhou: due to this resource could be existed in two groups, so we handle it only one time.
+	//       The initial value is false, once have been proceed, set it as true.
+	seen bool
 }
 
 func newCohabitatingResource(resource, group1, group2 string) *cohabitatingResource {

@@ -30,6 +30,8 @@ import (
 // interface.
 type ObjectStorePlugin struct {
 	plugin.NetRPCUnsupportedPlugin
+
+	// zhou: ./pkg/plugin/framework/plugin_base.go
 	*common.PluginBase
 }
 

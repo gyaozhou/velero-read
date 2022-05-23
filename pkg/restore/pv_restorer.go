@@ -47,6 +47,8 @@ type pvRestorer struct {
 	volInfoTracker          *volume.RestoreVolumeInfoTracker
 }
 
+// zhou: README, restore cloud VolumeSnapshot
+
 func (r *pvRestorer) executePVAction(obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	pvName := obj.GetName()
 	if pvName == "" {
@@ -78,11 +80,12 @@ func (r *pvRestorer) executePVAction(obj *unstructured.Unstructured) (*unstructu
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-
+	// zhou:
 	if err := volumeSnapshotter.Init(snapshotInfo.location.Spec.Config); err != nil {
 		return nil, errors.WithStack(err)
 	}
 
+	// zhou:
 	volumeID, err := volumeSnapshotter.CreateVolumeFromSnapshot(snapshotInfo.providerSnapshotID, snapshotInfo.volumeType, snapshotInfo.volumeAZ, snapshotInfo.volumeIOPS)
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -90,6 +93,7 @@ func (r *pvRestorer) executePVAction(obj *unstructured.Unstructured) (*unstructu
 
 	log.WithField("providerSnapshotID", snapshotInfo.providerSnapshotID).Info("successfully restored persistent volume from snapshot")
 
+	// zhou: like "pv.Spec.CSI.VolumeHandle = volumeID"
 	updated1, err := volumeSnapshotter.SetVolumeID(obj, volumeID)
 	if err != nil {
 		return nil, errors.WithStack(err)

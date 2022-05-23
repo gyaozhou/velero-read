@@ -20,8 +20,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// zhou: each "PluginKind" owns a field of "pluginBase". Because mulitply plugins could implement the same
+//       kind, e.g. type BackupItemActionPlugin struct {}.
+//       By this way, invoke their implements from this inferface.
+
 type PluginBase struct {
 	ClientLogger logrus.FieldLogger
+
+	// zhou: core part, handle register
+	//       ./pkg/plugin/framework/server_mux.go
+
 	*ServerMux
 }
 
@@ -40,6 +48,8 @@ func ClientLogger(logger logrus.FieldLogger) PluginOption {
 		base.ClientLogger = logger
 	}
 }
+
+// zhou: create critical "serverMux"
 
 func ServerLogger(logger logrus.FieldLogger) PluginOption {
 	return func(base *PluginBase) {

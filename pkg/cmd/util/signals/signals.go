@@ -25,6 +25,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// zhou: when received signal cancel context
+
 // CancelOnShutdown starts a goroutine that will call cancelFunc when
 // either SIGINT or SIGTERM is received
 func CancelOnShutdown(cancelFunc context.CancelFunc, logger logrus.FieldLogger) {

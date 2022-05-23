@@ -36,6 +36,7 @@ func GetSecret(client kbclient.Client, namespace, name string) (*corev1api.Secre
 	return secret, nil
 }
 
+// zhou: read value according to "selector"
 func GetSecretKey(client kbclient.Client, namespace string, selector *corev1api.SecretKeySelector) ([]byte, error) {
 	secret, err := GetSecret(client, namespace, selector.Name)
 	if err != nil {
